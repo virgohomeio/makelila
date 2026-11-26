@@ -430,11 +430,6 @@ export function EzTransPanel({
 
   const sentAt = justSent ?? priorSend?.ts ?? null;
   const inBatch = !!confirmedAt && !batchSentAt;
-  const batchFiles = batchAttachmentFilenames({
-    customerName: order.customer_name,
-    tracking: effTracking.trim() || '—',
-    needsWorksheet: worksheetGoes,
-  });
 
   return (
     <div className={styles.bookingPanel}>
@@ -443,16 +438,8 @@ export function EzTransPanel({
       </div>
       <p className={styles.bookingLead}>
         {placements.length === 1
-          ? `${first.serial} is`
-          : `${placements.length} machines are`} held at EZ Trans
-        {skidSummary ? ` on ${skidSummary}` : ''} — {extern
-          ? <>this carton is booked on Freightcom, but EZ Trans still hold the
-              machine and will not touch a box they have not been emailed
-              about. Queue them the confirmation so they can hand
-              {placements.length === 1 ? ' it' : ' them'} over.</>
-          : <>book this shipment on Goorooship, attach the label it gives you,
-              then send EZ Trans the confirmation so they can fulfill
-              {placements.length === 1 ? ' it' : ' them'}.</>}
+          ? first.serial
+          : `${placements.length} machines`} at EZ Trans{skidSummary ? ` (${skidSummary})` : ''}.
       </p>
 
       {offsite.length > 0 && (
@@ -498,7 +485,6 @@ export function EzTransPanel({
               rel="noopener noreferrer"
               className={styles.extLinkBtn}
             >Goorooship — Book a shipment ↗</a>
-            <span className={styles.bookingHint}>Book it first — the email says it is already booked.</span>
           </div>
         </li>
 
@@ -570,45 +556,33 @@ export function EzTransPanel({
                 ? 'Show edited email + packing list'
                 : 'Preview / edit email + packing list'}</button>
             {starterGap ? (
-              <span className={styles.bookingHint}>
-                The compost starter comes first — order it and paste the Amazon
-                tracking number in the card above. Once this email goes out the
-                3PL has the carton, and there is no adding a starter to it then.
-              </span>
+              <span className={styles.bookingHint}>Tick “Starter soil ordered” first.</span>
             ) : !ready ? (
-              <span className={styles.bookingHint}>
-                Carrier, tracking number and the label PDF are all required before this
-                order can join a batch.
-              </span>
+              <span className={styles.bookingHint}>Needs carrier, tracking # and label PDF.</span>
             ) : (
               <span className={styles.bookingHint}>
-                Confirming adds it to today's Goorooship email — sent from the button at
-                the bottom of the queue.{worksheetGoes
-                  ? ' This is a US entry — the signed pesticide worksheet goes with it,'
-                    + ' for the 3PL to upload for the broker rather than pack.'
-                  : ''}
+                Adds it to today's EZ Trans email (bottom of the page).
+                {worksheetGoes ? ' US order — pesticide worksheet included.' : ''}
               </span>
             )}
           </div>
 
           {batchSentAt ? (
             <div className={styles.bookingSent}>
-              ✓ Went out in the Goorooship batch of {new Date(batchSentAt).toLocaleString()}.
-              Confirm again only to send a correction.
+              ✓ Sent to EZ Trans {new Date(batchSentAt).toLocaleString()}.
             </div>
           ) : inBatch ? (
             <div className={styles.bookingBatchChip}>
               <span>
-                ✓ In today's batch since {new Date(confirmedAt as string).toLocaleTimeString()} —
-                it goes out with {batchFiles.combined}
-                {batchFiles.worksheet ? ` and ${batchFiles.worksheet}` : ''}.
+                ✓ In today's EZ Trans email ({new Date(confirmedAt as string).toLocaleTimeString()}).
               </span>
               <button
                 type="button"
                 className={styles.bookingPreviewToggle}
                 onClick={handleUnconfirm}
                 disabled={busy}
-              >Remove from today's batch</button>
+                data-testid="eztrans-undo-confirm"
+              >Undo — take out of email</button>
             </div>
           ) : null}
         </li>
@@ -629,11 +603,7 @@ export function EzTransPanel({
             >
               {busy ? 'Sending…' : sentAt ? `✉ Resend to ${EZTRANS_EMAIL} now` : `✉ Send to ${EZTRANS_EMAIL} now`}
             </button>
-            <span className={styles.bookingHint}>
-              {starterGap
-                ? 'Blocked for the same reason — the starter has to be ordered first.'
-                : 'For a rush shipment that cannot wait for the end-of-day email.'}
-            </span>
+            <span className={styles.bookingHint}>Rush only.</span>
           </div>
         </li>
       </ol>

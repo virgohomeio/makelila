@@ -42,9 +42,26 @@ describe('QueueSidebar', () => {
     expect(screen.getByText('3/6')).toBeInTheDocument();
   });
 
-  it('shows "Due TODAY" for today\'s deadline', () => {
-    render(<MemoryRouter><QueueSidebar readyRows={[row1]} shippedRows={[]} orderLookup={orders} selectedId={null} onSelect={vi.fn()} /></MemoryRouter>);
-    expect(screen.getByText(/Due TODAY/i)).toBeInTheDocument();
+  it('counts the pickup deadline from the confirm: book it by tomorrow', () => {
+    const justConfirmed = mkRow({ id: 'q7', order_id: 'o1', step: 1, created_at: new Date().toISOString() });
+    render(<MemoryRouter><QueueSidebar readyRows={[justConfirmed]} shippedRows={[]} orderLookup={orders} selectedId={null} onSelect={vi.fn()} /></MemoryRouter>);
+    expect(screen.getByText('Book pickup by tomorrow')).toBeInTheDocument();
+  });
+
+  it('once the pickup is booked, counts down to the pickup itself', () => {
+    const booked = mkRow({ id: 'q8', order_id: 'o1', step: 4, created_at: new Date().toISOString() });
+    render(<MemoryRouter><QueueSidebar readyRows={[booked]} shippedRows={[]} orderLookup={orders} selectedId={null} onSelect={vi.fn()} /></MemoryRouter>);
+    expect(screen.getByText(/^Picked up by /)).toBeInTheDocument();
+  });
+
+  it('tags a Walmart / Best Buy order under Ready to ship', () => {
+    const walmart = new Map<string, QueueOrderSummary>([
+      ['o1', { order_ref: '#1001', customer_name: 'Alice', city: 'Portland', country: 'US', sales_channel: 'Walmart Marketplace' }],
+      ['o2', { order_ref: '#1002', customer_name: 'Bob', city: 'Toronto', country: 'CA', sales_channel: 'Best Buy' }],
+    ]);
+    render(<MemoryRouter><QueueSidebar readyRows={[row1, row2]} shippedRows={[]} orderLookup={walmart} selectedId={null} onSelect={vi.fn()} /></MemoryRouter>);
+    expect(screen.getByText('Walmart')).toBeInTheDocument();
+    expect(screen.getByText('Best Buy')).toBeInTheDocument();
   });
 
   it('calls onSelect with the row id', () => {
@@ -151,7 +168,7 @@ describe('QueueSidebar', () => {
         selectedId={null} onSelect={vi.fn()} /></MemoryRouter>);
       fireEvent.click(screen.getByText(/^Shipped/));
       expect(screen.getByText('✓ Fulfilled')).toBeInTheDocument();
-      expect(screen.queryByText(/OVERDUE/)).not.toBeInTheDocument();
+      expect(screen.queryByText(/late$/)).not.toBeInTheDocument();
     });
 
     it('leaves an unmarked row showing its real due state', () => {
@@ -160,7 +177,7 @@ describe('QueueSidebar', () => {
         shippedMarks={new Map()}
         selectedId={null} onSelect={vi.fn()} /></MemoryRouter>);
       expect(screen.queryByText('ALREADY SHIPPED')).not.toBeInTheDocument();
-      expect(screen.getByText(/OVERDUE/)).toBeInTheDocument();
+      expect(screen.getByText(/late$/)).toBeInTheDocument();
     });
   });
 
@@ -394,7 +411,7 @@ describe('QueueSidebar', () => {
       /></MemoryRouter>);
       fireEvent.click(screen.getByRole('button', { name: /to be picked up 0/i }));
       expect(screen.getByText(/Nothing waiting on a carrier/i)).toBeInTheDocument();
-      expect(screen.getByText(/once the shipping email has gone to the customer/i)).toBeInTheDocument();
+      expect(screen.getByText(/once the pickup is booked/i)).toBeInTheDocument();
     });
 
     it('points a fruitless search at the pickup rail when the order is there', () => {
@@ -455,7 +472,7 @@ describe('QueueSidebar', () => {
       /></MemoryRouter>);
       fireEvent.click(screen.getByRole('button', { name: /^received 0$/i }));
       expect(screen.getByText(/Nothing confirmed as received/i)).toBeInTheDocument();
-      expect(screen.getByText(/Shipment Received is clicked/i)).toBeInTheDocument();
+      expect(screen.getByText(/Click Shipment Received/i)).toBeInTheDocument();
     });
 
     it('a fruitless search names it like any other rail', () => {

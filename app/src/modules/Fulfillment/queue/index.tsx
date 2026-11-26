@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import { supabase } from '../../../lib/supabase';
 import { useFulfillmentQueue, type FulfillmentQueueRow, type SendFulfillmentEmailResult } from '../../../lib/fulfillment';
 import type { OrderStatus, Order as FullOrder } from '../../../lib/orders';
-import { QueueSidebar } from './QueueSidebar';
+import { QueueSidebar, priorityTag } from './QueueSidebar';
 import { QueueHeader } from './QueueHeader';
 import { StepAssign } from './StepAssign';
 import { StepPartsOnly } from './StepPartsOnly';
@@ -60,6 +60,11 @@ type Order = {
   // and it is what keeps a reship out of the already-shipped rail even though
   // its first machine is stamped and shipped. select('*') returns it.
   reconcile_outcome: string | null;
+  // Walmart / Best Buy marker and Sales' priority pin (select('*') returns both).
+  sales_channel?: string | null;
+  is_priority?: boolean | null;
+  // When Sales confirmed it — starts the ship clock (lib/shipDeadlines.ts).
+  dispositioned_at?: string | null;
 };
 
 export default function Queue() {
@@ -118,11 +123,15 @@ export default function Queue() {
       const refB = orderLookup.get(b.order_id)?.order_ref ?? '';
       return refA.localeCompare(refB);
     };
-    // Priority rows (sales-flagged expedites) float to the top of Ready.
+    // Priority rows float to the top of Ready: queue-starred expedites and
+    // Sales priority orders (Walmart / Best Buy / hand-pinned) alike.
+    const isHot = (r: FulfillmentQueueRow) =>
+      r.priority || priorityTag(orderLookup.get(r.order_id)) !== null;
     const readySorted = [...ready]
       .filter(r => !shippedMarks.has(r.id))
       .sort((a, b) => {
-        if (a.priority !== b.priority) return a.priority ? -1 : 1;
+        const ha = isHot(a), hb = isHot(b);
+        if (ha !== hb) return ha ? -1 : 1;
         return byRef(a, b);
       });
     // Moved, not hidden: the row still has an order behind it that someone has

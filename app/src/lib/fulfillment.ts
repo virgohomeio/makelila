@@ -86,6 +86,9 @@ export type FulfillmentQueueRow = {
   starter_skipped_at?: string | null;
   starter_skipped_by?: string | null;
   starter_skip_reason?: string | null;
+  // "Starter soil ordered" checkbox (20261126120000).
+  starter_ordered_at?: string | null;
+  starter_ordered_by?: string | null;
   email_sent_at: string | null;
   email_sent_by: string | null;
   // The automatic next-day onboarding-instructions email

@@ -48,7 +48,7 @@ vi.mock('./refundedOrders', () => ({
   refundFlagTitle: vi.fn(() => ''),
 }));
 
-import { disposition, SALE_CONFIRMED_NOTIFY } from './orders';
+import { disposition, saleKindLabel, SALE_CONFIRMED_NOTIFY } from './orders';
 
 const ORDER = {
   id: 'ord-1',
@@ -129,5 +129,23 @@ describe('sale-confirmed notification', () => {
 
   it('exports the recipient so re-routing the notice is a one-line change', () => {
     expect(SALE_CONFIRMED_NOTIFY).toBe('reina@virgohome.io');
+  });
+});
+
+describe('priority orders say so in the subject', () => {
+  it('names the marketplace for Walmart and Best Buy', () => {
+    expect(saleKindLabel({ sales_channel: 'Walmart Marketplace' })).toBe('PRIORITY Walmart order');
+    expect(saleKindLabel({ sales_channel: 'Best Buy Canada' })).toBe('PRIORITY Best Buy order');
+    expect(saleKindLabel({ sales_channel: 'Online Store' })).toBe('Sale');
+    expect(saleKindLabel({ is_priority: true })).toBe('PRIORITY order');
+  });
+
+  it('passes sale_kind and the ship deadlines to the template', async () => {
+    await disposition({ ...ORDER, sales_channel: 'Walmart' }, 'approved');
+    const vars = (sendTemplateMock.mock.calls[0][0] as any).variables;
+    expect(vars.sale_kind).toBe('PRIORITY Walmart order');
+    expect(vars.channel).toBe('Walmart');
+    expect(vars.schedule_by).toBeTruthy();
+    expect(vars.pickup_by).toBeTruthy();
   });
 });

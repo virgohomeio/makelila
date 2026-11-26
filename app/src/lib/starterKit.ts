@@ -41,6 +41,8 @@ export type StarterKitRow = {
   /** Added by 20261007120000; undefined on a database that has not run it. */
   starter_skipped_at?: string | null;
   starter_skip_reason?: string | null;
+  /** The "Starter soil ordered" checkbox (20261126120000). */
+  starter_ordered_at?: string | null;
 };
 
 /** What deciding this needs off the order. */
@@ -73,6 +75,7 @@ export function starterRequired(order: StarterKitOrder): boolean {
 /** Has the starter question been answered on this row — either a number is on
  *  it, or somebody has said why there is none? */
 export function starterSettled(row: StarterKitRow): boolean {
+  if (row.starter_ordered_at) return true;
   if (row.starter_tracking_num && row.starter_tracking_num.trim()) return true;
   return !!row.starter_skipped_at;
 }
@@ -82,12 +85,43 @@ export function starterSettled(row: StarterKitRow): boolean {
  *  Phrased as the thing that is missing rather than as the field that is empty:
  *  the operator's job here is to go and buy a bag of soil, and "the Amazon
  *  starter-kit tracking number" is what they will have afterwards. */
-export const STARTER_BLOCKER = 'the compost starter ordered, with its Amazon tracking number';
+export const STARTER_BLOCKER = 'the Amazon starter soil ticked as ordered';
 
 export function starterBlocker(order: StarterKitOrder, row: StarterKitRow): string | null {
   if (!starterRequired(order)) return null;
   if (starterSettled(row)) return null;
   return STARTER_BLOCKER;
+}
+
+/** The activity_log type written when the starter checkbox is ticked/unticked. */
+export const STARTER_ORDERED_ACTION = 'fq_starter_ordered';
+
+/** Tick or untick "Starter soil ordered". Replaces the tracking-number field
+ *  (2026-11-26): ordering the bag is the job, the number was paperwork. */
+export async function setStarterOrdered(
+  queueId: string,
+  ordered: boolean,
+  refs?: { orderRef?: string; orderId?: string },
+): Promise<string | null> {
+  const at = ordered ? new Date().toISOString() : null;
+  const { data } = await supabase.auth.getUser();
+  const { error } = await supabase
+    .from('fulfillment_queue')
+    .update({ starter_ordered_at: at, starter_ordered_by: ordered ? data.user?.id ?? null : null })
+    .eq('id', queueId);
+  if (error) {
+    if (error.code === '42703' || error.code === 'PGRST204' || /starter_ordered/.test(error.message ?? '')) {
+      throw new Error('The starter-soil checkbox needs migration 20261126120000 applied.');
+    }
+    throw error;
+  }
+  await logAction(
+    STARTER_ORDERED_ACTION,
+    refs?.orderRef ?? queueId,
+    ordered ? 'Starter soil marked as ordered on Amazon.' : 'Starter soil un-ticked — not ordered yet.',
+    refs?.orderId ? { entityType: 'order', entityId: refs.orderId } : undefined,
+  );
+  return at;
 }
 
 /** Save the Amazon tracking number against the row as soon as it is typed.

@@ -5,7 +5,10 @@ import {
 } from '../../../lib/fulfillment';
 import { useAuth } from '../../../lib/auth';
 import { canRebookShipment, rebookShipment } from '../../../lib/rebookShipment';
-import { orderDue, markOrderDelivered, localDayString, type Order } from '../../../lib/orders';
+import { markOrderDelivered, localDayString, resellerLabel, type Order } from '../../../lib/orders';
+import {
+  confirmedAtOf, daysUntil, severityOf, shipDeadlines, shortDate, stageForStep,
+} from '../../../lib/shipDeadlines';
 import { replacementItemsLabel } from '../../../lib/replacementTags';
 import styles from '../Fulfillment.module.css';
 
@@ -38,6 +41,10 @@ export function QueueHeader({
     /** When the customer confirmed the box arrived. Set = this order is in the
      *  Received rail and the button is replaced by the date. */
     delivered_at?: string | null;
+    status?: string | null;
+    dispositioned_at?: string | null;
+    sales_channel?: string | null;
+    is_priority?: boolean | null;
   };
   /** True when the box has gone even though the row never reached step 6 — a
    *  shipment booked outside the queue, recognised by lib/shippedOrders. Those
@@ -55,7 +62,17 @@ export function QueueHeader({
 }) {
   const { profile, user } = useAuth();
   const operatorName = profile?.display_name ?? user?.email ?? 'Unknown';
-  const due = orderDue(order.placed_at ?? order.created_at);
+  // Ship SLA from the Sales confirm: book the pickup by +1 day, picked up by +2.
+  const deadlines = shipDeadlines(confirmedAtOf(row, order));
+  const liveStage = stageForStep(row.step);
+  const sevFor = (d: Date) => {
+    const s = severityOf(daysUntil(d));
+    return s === 'overdue' ? 'due_overdue' : s === 'today' ? 'due_urgent' : 'due_ok';
+  };
+  const reseller = resellerLabel(order);
+  const channelTag = reseller === 'Walmart' || reseller === 'Best Buy'
+    ? reseller
+    : order.is_priority ? 'Priority' : null;
   const STEP_LABELS = ['', 'Assign', 'Test', 'Label', 'Email', 'Pickup', 'Fulfilled'];
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -259,10 +276,12 @@ export function QueueHeader({
             {order.kind === 'replacement' && (
               <span className="replBadge" title="Warranty / service replacement — not a sale">Replacement</span>
             )}
+            {channelTag && !fulfilled && (
+              <span className={styles.channelTag} title="Priority order — ship first">{channelTag}</span>
+            )}
           </div>
           <div className={styles.headerMeta}>
             {order.order_ref} · {order.city}{order.region_state ? `, ${order.region_state}` : ''} · {order.country}
-            {row.due_date && <> · Due {new Date(row.due_date).toLocaleDateString('en-US')}</>}
             {/* Why this box exists. Cancelling from here moves the ticket to
                 On Hold, so the operator should be one click from reading it. */}
             {order.kind === 'replacement' && order.linked_ticket_id && (
@@ -278,13 +297,21 @@ export function QueueHeader({
             >
               Fulfilled: {fulfilledOn || '—'}
             </span>
-          ) : due.dueDate && (
-            <span
-              className={`${styles.duePill} ${styles[`due_${due.severity}`]}`}
-              title="Order-confirmation SLA: placed date + 2 days"
-            >
-              Due: {due.dueLabel}
-            </span>
+          ) : !hasShipped && (
+            <>
+              <span
+                className={`${styles.duePill} ${styles[liveStage === 'schedule' ? sevFor(deadlines.scheduleBy) : 'due_ok']}`}
+                title={`Confirmed ${deadlines.confirmedAt.toLocaleString()} — book the pickup by end of the next day`}
+              >
+                {liveStage === 'schedule' ? `Book pickup by ${shortDate(deadlines.scheduleBy)}` : '✓ Pickup booked'}
+              </span>
+              <span
+                className={`${styles.duePill} ${styles[sevFor(deadlines.pickupBy)]}`}
+                title="Carrier must pick it up within 2 days of the Sales confirm"
+              >
+                Picked up by {shortDate(deadlines.pickupBy)}
+              </span>
+            </>
           )}
           {receivedDay && (
             <span

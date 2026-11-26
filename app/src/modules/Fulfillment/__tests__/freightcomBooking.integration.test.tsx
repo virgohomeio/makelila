@@ -151,7 +151,6 @@ describe('confirming the label on a Freightcom order, end to end', () => {
     await waitFor(() => expect(confirmLabelMock).toHaveBeenCalledWith('q-1169', expect.objectContaining({
       carrier: 'Purolator',
       tracking_num: '520766148800',
-      starter_tracking_num: 'TBA303011917292',
     })));
   });
 

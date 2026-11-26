@@ -1,3 +1,4 @@
+import { shipDeadlines } from './shipDeadlines';
 import { useEffect, useMemo, useState } from 'react';
 import type { RealtimeChannel } from '@supabase/supabase-js';
 import { supabase } from './supabase';
@@ -330,11 +331,26 @@ const FULFILLMENT_QUEUE_URL = `${APP_BASE_URL}/fulfillment/queue`;
  *  so a mail failure must never surface as a failed confirmation. An operator
  *  who saw Confirm fail would click it again, and on this action that means a
  *  second order_approve in the log for an order that was already confirmed. */
+/** How the confirmed-sale email names the order, subject line first:
+ *  "PRIORITY Walmart order", "PRIORITY Best Buy order", "PRIORITY order" for a
+ *  hand-pinned one, plain "Sale" otherwise. The template subject is
+ *  "{{sale_kind}} confirmed — {{order_ref}} · {{customer_name}}". */
+export function saleKindLabel(
+  o: Partial<Pick<Order, 'sales_channel' | 'is_priority'>>,
+): string {
+  const reseller = resellerLabel({ sales_channel: o.sales_channel ?? null });
+  if (reseller === 'Walmart' || reseller === 'Best Buy') return `PRIORITY ${reseller} order`;
+  if (o.is_priority) return 'PRIORITY order';
+  return 'Sale';
+}
+
 async function notifySaleConfirmed(
   order: Pick<Order, 'id' | 'order_ref' | 'customer_name'> &
-    Partial<Pick<Order, 'total_usd' | 'currency'>>,
+    Partial<Pick<Order, 'total_usd' | 'currency' | 'sales_channel' | 'is_priority'>>,
   confirmedByEmail: string | null,
 ): Promise<void> {
+  const d = shipDeadlines(new Date());
+  const day = (x: Date) => x.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
   try {
     await sendTemplate({
       template_key: 'sale_confirmed',
@@ -350,6 +366,10 @@ async function notifySaleConfirmed(
           ? `${Number(order.total_usd).toFixed(2)} ${order.currency ?? ''}`.trim()
           : '\u2014',
         confirmed_by: confirmedByEmail ?? 'An operator',
+        sale_kind: saleKindLabel(order),
+        channel: resellerLabel({ sales_channel: order.sales_channel ?? null }) ?? 'Website',
+        schedule_by: day(d.scheduleBy),
+        pickup_by: day(d.pickupBy),
         queue_url: FULFILLMENT_QUEUE_URL,
         order_url: `${APP_BASE_URL}/order-review/${order.id}`,
       },
@@ -361,7 +381,7 @@ async function notifySaleConfirmed(
 
 export async function disposition(
   order: Pick<Order, 'id' | 'order_ref' | 'customer_name'> &
-    Partial<Pick<Order, 'total_usd' | 'currency' | 'kind'>>,
+    Partial<Pick<Order, 'total_usd' | 'currency' | 'kind' | 'sales_channel' | 'is_priority'>>,
   status: Disposition,
   reason?: string,
 ): Promise<void> {
@@ -544,7 +564,7 @@ export const AREA_TYPE_TAG: Record<AreaType, string> = {
  *  still lands in the right bucket. Only resellers get a label — a null return
  *  means "our website", which carries no marker. Mirrors the Journey Report's
  *  Sale Source bucketing (saleSourceOf) so the two agree. */
-export function resellerLabel(o: Order): 'Walmart' | 'Best Buy' | 'Shopify Collective' | null {
+export function resellerLabel(o: Pick<Order, 'sales_channel'>): 'Walmart' | 'Best Buy' | 'Shopify Collective' | null {
   const lc = (o.sales_channel ?? '').trim().toLowerCase();
   if (lc.includes('walmart')) return 'Walmart';
   if (lc.includes('best buy') || lc.includes('bestbuy')) return 'Best Buy';
@@ -2353,19 +2373,19 @@ const REPLACEMENT_ORDER_DEFAULTS = {
   sales_confirmed_fit: false,
 };
 
-/** Put an order into the fulfillment queue at step 1, due in 7 days — the same
- *  SLA the auto_enqueue_on_approve trigger applies when a sale is confirmed.
+/** Put an order into the fulfillment queue at step 1, due tomorrow — the same
+ *  SLA the auto_enqueue_on_approve trigger applies when a sale is confirmed:
+ *  pickup booked by confirm day + 1, picked up by + 2 (lib/shipDeadlines.ts).
  *
  *  A duplicate is success, not failure: fulfillment_queue.order_id is unique,
  *  so a 23505 means the order is already queued (the trigger got there first,
  *  or this is a retry after a partial failure). Anything else is real. */
 export async function enqueueForFulfillment(orderId: string): Promise<void> {
   await assertNotRefunded(orderId, 'Cannot queue this order for fulfillment');
-  const due = new Date();
-  due.setDate(due.getDate() + 7);
+  const due = shipDeadlines(new Date()).scheduleBy;
   const { error } = await supabase.from('fulfillment_queue').insert({
     order_id: orderId,
-    due_date: due.toISOString().slice(0, 10),
+    due_date: localDayString(due),
   });
   if (error && error.code !== '23505') {
     throw new Error(`Could not queue the order for fulfillment: ${error.message}`);
