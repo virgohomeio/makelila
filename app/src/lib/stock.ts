@@ -277,6 +277,85 @@ export async function updateUnitStatus(
   noteAppend?: string,
 ): Promise<void> {
   const userId = await currentUserId();
+  await applyUnitStatus(serial, newStatus, userId, noteAppend);
+}
+
+/** Trailing machine number of a serial: 'LL01-00000000601' → 601. Null when
+ *  the serial doesn't end in digits. Lets operators speak in the numbers
+ *  printed on the machines rather than the zero-padded serial. */
+export function serialNumber(serial: string): number | null {
+  const m = /(\d+)$/.exec(serial);
+  return m ? Number(m[1]) : null;
+}
+
+/** Serials of the given units whose machine number falls in [from, to]
+ *  (inclusive, either order). Units are returned in the order given. */
+export function serialsInRange(units: Pick<Unit, 'serial'>[], from: number, to: number): string[] {
+  const lo = Math.min(from, to);
+  const hi = Math.max(from, to);
+  return units
+    .filter(u => {
+      const n = serialNumber(u.serial);
+      return n !== null && n >= lo && n <= hi;
+    })
+    .map(u => u.serial);
+}
+
+export type BulkStatusResult = {
+  updated: string[];
+  failed: Array<{ serial: string; message: string }>;
+};
+
+/** Change many machines to one status. Each unit goes through exactly the
+ *  same write as the per-row dropdown (applyUnitStatus) — status_updated_by,
+ *  the release-to-ready customer clear, and one activity-log entry per unit —
+ *  so a bulk change leaves the same audit trail as clicking every row.
+ *
+ *  Deliberately per-unit rather than one `.in('serial', …)` update: a DB guard
+ *  rejecting one machine would otherwise fail the whole statement, and the
+ *  operator needs to know *which* units didn't move. Failures are collected,
+ *  never thrown, so one bad unit can't strand the rest half-done. */
+export async function updateUnitsStatus(
+  serials: string[],
+  newStatus: UnitStatus,
+  opts: { concurrency?: number; onProgress?: (done: number, total: number) => void } = {},
+): Promise<BulkStatusResult> {
+  const userId = await currentUserId();
+  const queue = [...new Set(serials)];
+  const total = queue.length;
+  const result: BulkStatusResult = { updated: [], failed: [] };
+  let done = 0;
+  let next = 0;
+
+  const worker = async () => {
+    while (next < queue.length) {
+      const serial = queue[next++];
+      try {
+        await applyUnitStatus(serial, newStatus, userId);
+        result.updated.push(serial);
+      } catch (e) {
+        result.failed.push({ serial, message: (e as Error).message ?? String(e) });
+      }
+      done++;
+      opts.onProgress?.(done, total);
+    }
+  };
+
+  const n = Math.max(1, Math.min(opts.concurrency ?? 5, total));
+  await Promise.all(Array.from({ length: n }, worker));
+  // Workers finish out of order; report in the order the operator selected.
+  const order = new Map(queue.map((s, i) => [s, i]));
+  result.updated.sort((a, b) => order.get(a)! - order.get(b)!);
+  result.failed.sort((a, b) => order.get(a.serial)! - order.get(b.serial)!);
+  return result;
+}
+
+async function applyUnitStatus(
+  serial: string,
+  newStatus: UnitStatus,
+  userId: string,
+  noteAppend?: string,
+): Promise<void> {
   const { data: existing } = await supabase
     .from('units').select('notes, status').eq('serial', serial).single();
   const nextNotes = noteAppend

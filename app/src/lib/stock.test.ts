@@ -56,6 +56,7 @@ vi.mock('./supabaseTelemetry', () => ({
 
 import {
   updateUnitStatus, mergeTimelineEvents, createBatch, isStockManager, findMacDuplicates,
+  updateUnitsStatus, serialNumber, serialsInRange,
   type TimelineEvent,
 } from './stock';
 
@@ -147,6 +148,83 @@ describe('updateUnitStatus', () => {
         expect.not.objectContaining({ customer_order_ref: null }),
       );
     });
+});
+
+describe('serialNumber / serialsInRange', () => {
+  it('reads the machine number off the end of a serial', () => {
+    expect(serialNumber('LL01-00000000601')).toBe(601);
+    expect(serialNumber('LL01-00000000001')).toBe(1);
+    expect(serialNumber('LL01-ABC')).toBeNull();
+  });
+
+  it('picks units whose number is in the inclusive range, either order', () => {
+    const units = ['LL01-00000000600', 'LL01-00000000601', 'LL01-00000000700',
+      'LL01-00000000780', 'LL01-00000000781', 'LL01-X'].map(serial => ({ serial }));
+    const want = ['LL01-00000000601', 'LL01-00000000700', 'LL01-00000000780'];
+    expect(serialsInRange(units, 601, 780)).toEqual(want);
+    expect(serialsInRange(units, 780, 601)).toEqual(want);
+  });
+});
+
+describe('updateUnitsStatus', () => {
+  beforeEach(() => {
+    fromMock.mockClear();
+    updateMock.mockClear();
+    logActionMock.mockClear();
+    getUserMock.mockClear();
+    singleResult.data = { status: 'inbound' };
+    singleResult.error = null;
+  });
+
+  it('writes and logs every unit the same way the single-unit path does', async () => {
+    const serials = ['LL01-00000000601', 'LL01-00000000602', 'LL01-00000000603'];
+    const res = await updateUnitsStatus(serials, 'ready');
+
+    expect(res).toEqual({ updated: serials, failed: [] });
+    expect(updateMock).toHaveBeenCalledTimes(3);
+    expect(updateMock).toHaveBeenCalledWith(expect.objectContaining({
+      status: 'ready', status_updated_by: 'user-1', customer_name: null, customer_order_ref: null,
+    }));
+    for (const s of serials) {
+      expect(logActionMock).toHaveBeenCalledWith('stock_status', s, 'inbound → ready',
+        { entityType: 'unit', unitSerial: s });
+    }
+    // One auth lookup for the whole batch, not one per unit.
+    expect(getUserMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('de-duplicates serials', async () => {
+    const res = await updateUnitsStatus(['LL01-A', 'LL01-A', 'LL01-B'], 'rework');
+    expect(res.updated).toEqual(['LL01-A', 'LL01-B']);
+    expect(updateMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps going past a rejected unit and reports which one failed', async () => {
+    const realImpl = updateMock.getMockImplementation()!;
+    (updateMock as unknown as { mockImplementation: (f: () => unknown) => void }).mockImplementation(() => ({
+      eq: (_col: string, serial: string) => Promise.resolve(
+        serial === 'LL01-B' ? { error: { message: 'guard rejected' } } : { error: null },
+      ),
+    }));
+    const progress: number[] = [];
+    try {
+      const res = await updateUnitsStatus(['LL01-A', 'LL01-B', 'LL01-C'], 'shipped', {
+        onProgress: done => progress.push(done),
+      });
+      expect(res.updated).toEqual(['LL01-A', 'LL01-C']);
+      expect(res.failed).toEqual([{ serial: 'LL01-B', message: 'guard rejected' }]);
+      expect(logActionMock).not.toHaveBeenCalledWith('stock_status', 'LL01-B', expect.anything(), expect.anything());
+      expect(progress).toEqual([1, 2, 3]);
+    } finally {
+      updateMock.mockImplementation(realImpl);
+    }
+  });
+
+  it('does nothing for an empty selection', async () => {
+    const res = await updateUnitsStatus([], 'ready');
+    expect(res).toEqual({ updated: [], failed: [] });
+    expect(updateMock).not.toHaveBeenCalled();
+  });
 });
 
 // ── Fulfillment queue: quarantine exclusion ───────────────────────────────────
