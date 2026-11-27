@@ -1,9 +1,10 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   STATUS_META, STATUS_ORDER, getStatusMeta, updateUnitStatus, updateUnitFields,
-  linkUnitToCustomer, QC_CHECK_META,
+  linkUnitToCustomer, serialsInRange, QC_CHECK_META,
   type Unit, type UnitStatus, type QcCheck,
 } from '../../lib/stock';
+import { BulkStatusModal } from './BulkStatusModal';
 import { useCustomers } from '../../lib/customers';
 import { matchUnitToCustomer, isAutoLinkable } from '../../lib/customerNameMatch';
 import {
@@ -37,6 +38,50 @@ export function UnitTable({
   const assignUnit = units.find(u => u.serial === assignSerial) ?? null;
   const [orderAssignSerial, setOrderAssignSerial] = useState<string | null>(null);
 
+  // Bulk selection. Kept across filter changes, but every bulk action only
+  // ever acts on the selected units that are *visible* — a hidden selection
+  // must never be changed behind the operator's back.
+  const [selected, setSelected] = useState<Set<string>>(() => new Set());
+  const [rangeFrom, setRangeFrom] = useState('');
+  const [rangeTo, setRangeTo] = useState('');
+  const [rangeMsg, setRangeMsg] = useState<string | null>(null);
+  const [showBulk, setShowBulk] = useState(false);
+  const selectedUnits = useMemo(() => units.filter(u => selected.has(u.serial)), [units, selected]);
+  const allVisibleSelected = units.length > 0 && selectedUnits.length === units.length;
+  const headerCheckRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (headerCheckRef.current) {
+      headerCheckRef.current.indeterminate = selectedUnits.length > 0 && !allVisibleSelected;
+    }
+  }, [selectedUnits.length, allVisibleSelected]);
+
+  const toggleOne = (serial: string) => setSelected(prev => {
+    const next = new Set(prev);
+    if (next.has(serial)) next.delete(serial); else next.add(serial);
+    return next;
+  });
+  const toggleAllVisible = () => setSelected(prev => {
+    const next = new Set(prev);
+    if (allVisibleSelected) units.forEach(u => next.delete(u.serial));
+    else units.forEach(u => next.add(u.serial));
+    return next;
+  });
+  const selectRange = () => {
+    const from = Number(rangeFrom);
+    const to = rangeTo.trim() === '' ? from : Number(rangeTo);
+    if (!rangeFrom.trim() || !Number.isInteger(from) || !Number.isInteger(to)) {
+      setRangeMsg('Enter machine numbers, e.g. 601 – 780');
+      return;
+    }
+    const hits = serialsInRange(units, from, to);
+    const span = Math.abs(to - from) + 1;
+    setSelected(prev => new Set([...prev, ...hits]));
+    setRangeMsg(hits.length === span
+      ? `Selected ${hits.length}`
+      : `Selected ${hits.length} of ${span} — the rest aren't in the current list`);
+  };
+  const clearSelection = () => { setSelected(new Set()); setRangeMsg(null); };
+
   const commit = async (serial: string) => {
     const next = pending[serial];
     if (!next) return;
@@ -67,11 +112,55 @@ export function UnitTable({
   }
 
   return (
+    <>
+    <div className={styles.bulkBar}>
+      <span className={styles.filterLabel}>Machines</span>
+      <input
+        value={rangeFrom}
+        onChange={e => { setRangeFrom(e.target.value); setRangeMsg(null); }}
+        onKeyDown={e => { if (e.key === 'Enter') selectRange(); }}
+        placeholder="from #"
+        aria-label="Range from"
+        inputMode="numeric"
+        className={styles.bulkRangeInput}
+      />
+      <span className={styles.muted}>–</span>
+      <input
+        value={rangeTo}
+        onChange={e => { setRangeTo(e.target.value); setRangeMsg(null); }}
+        onKeyDown={e => { if (e.key === 'Enter') selectRange(); }}
+        placeholder="to #"
+        aria-label="Range to"
+        inputMode="numeric"
+        className={styles.bulkRangeInput}
+      />
+      <button className={styles.btnSecondary} onClick={selectRange}>Select range</button>
+      {rangeMsg && <span className={styles.bulkMsg}>{rangeMsg}</span>}
+      <span className={styles.bulkSpacer} />
+      <span className={styles.bulkCount}>{selectedUnits.length} selected</span>
+      {selectedUnits.length > 0 && (
+        <button className={styles.btnSecondary} onClick={clearSelection}>Clear</button>
+      )}
+      <button
+        className={styles.btnPrimary}
+        disabled={selectedUnits.length === 0}
+        onClick={() => setShowBulk(true)}
+      >Change status…</button>
+    </div>
     <div className={styles.tableWrap}>
       {error && <div className={styles.errorBar}>{error}</div>}
       <table className={styles.table}>
         <thead>
           <tr>
+            <th className={styles.checkCell}>
+              <input
+                ref={headerCheckRef}
+                type="checkbox"
+                checked={allVisibleSelected}
+                onChange={toggleAllVisible}
+                aria-label="Select all shown"
+              />
+            </th>
             <th>Serial</th>
             <th>Batch</th>
             <th>Color</th>
@@ -110,6 +199,14 @@ export function UnitTable({
             const dupSerials = macDupes.get(u.serial);
             return (
               <tr key={u.serial} className={isQuarantined ? styles.rowQuarantine : undefined}>
+                <td className={styles.checkCell}>
+                  <input
+                    type="checkbox"
+                    checked={selected.has(u.serial)}
+                    onChange={() => toggleOne(u.serial)}
+                    aria-label={`Select ${u.serial}`}
+                  />
+                </td>
                 <td className={styles.serial}>
                   {u.serial}
                   {isQuarantined && (
@@ -239,7 +336,20 @@ export function UnitTable({
           onError={setError}
         />
       )}
+      {showBulk && (
+        <BulkStatusModal
+          units={selectedUnits}
+          onClose={() => setShowBulk(false)}
+          onDone={updated => setSelected(prev => {
+            // Drop what moved; keep failures selected so they can be retried.
+            const next = new Set(prev);
+            updated.forEach(s => next.delete(s));
+            return next;
+          })}
+        />
+      )}
     </div>
+    </>
   );
 }
 
