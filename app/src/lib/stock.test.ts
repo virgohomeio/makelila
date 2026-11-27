@@ -6,7 +6,7 @@ const {
   singleResult, logActionMock, getUserMock,
 } = vi.hoisted(() => {
   // Mutable cell so individual tests can override the single() response.
-  const singleResult: { data: { status: string } | null; error: null | { message: string } } =
+  const singleResult: { data: { status: string; location?: string | null } | null; error: null | { message: string } } =
     { data: { status: 'ready' }, error: null };
 
   // Batch-admin additions: the stock_managers read ends in .limit(), and
@@ -56,7 +56,7 @@ vi.mock('./supabaseTelemetry', () => ({
 
 import {
   updateUnitStatus, mergeTimelineEvents, createBatch, isStockManager, findMacDuplicates,
-  updateUnitsStatus, serialNumber, serialsInRange,
+  bulkUpdateUnits, serialNumber, serialsInRange,
   type TimelineEvent,
 } from './stock';
 
@@ -166,25 +166,28 @@ describe('serialNumber / serialsInRange', () => {
   });
 });
 
-describe('updateUnitsStatus', () => {
+describe('bulkUpdateUnits', () => {
   beforeEach(() => {
     fromMock.mockClear();
     updateMock.mockClear();
     logActionMock.mockClear();
     getUserMock.mockClear();
-    singleResult.data = { status: 'inbound' };
+    singleResult.data = { status: 'inbound', location: 'VentureLab' };
     singleResult.error = null;
   });
 
-  it('writes and logs every unit the same way the single-unit path does', async () => {
-    const serials = ['LL01-00000000601', 'LL01-00000000602', 'LL01-00000000603'];
-    const res = await updateUnitsStatus(serials, 'ready');
+  const n = (x: number) => `LL01-${String(x).padStart(11, '0')}`;
+
+  it('writes and logs a status change the same way the single-unit path does', async () => {
+    const serials = [n(601), n(602), n(603)];
+    const res = await bulkUpdateUnits(serials.map(serial => ({ serial, status: 'ready' as const })));
 
     expect(res).toEqual({ updated: serials, failed: [] });
     expect(updateMock).toHaveBeenCalledTimes(3);
     expect(updateMock).toHaveBeenCalledWith(expect.objectContaining({
       status: 'ready', status_updated_by: 'user-1', customer_name: null, customer_order_ref: null,
     }));
+    expect(updateMock).toHaveBeenCalledWith(expect.not.objectContaining({ location: expect.anything() }));
     for (const s of serials) {
       expect(logActionMock).toHaveBeenCalledWith('stock_status', s, 'inbound → ready',
         { entityType: 'unit', unitSerial: s });
@@ -193,8 +196,28 @@ describe('updateUnitsStatus', () => {
     expect(getUserMock).toHaveBeenCalledTimes(1);
   });
 
-  it('de-duplicates serials', async () => {
-    const res = await updateUnitsStatus(['LL01-A', 'LL01-A', 'LL01-B'], 'rework');
+  it('moves location alone without touching status, and logs old → new', async () => {
+    const res = await bulkUpdateUnits([{ serial: n(601), location: 'EZTrans' }]);
+    expect(res.updated).toEqual([n(601)]);
+    expect(updateMock).toHaveBeenCalledWith({ location: 'EZTrans' });
+    expect(logActionMock).toHaveBeenCalledWith('stock_edit', n(601), 'location: VentureLab → EZTrans',
+      { entityType: 'unit', unitSerial: n(601) });
+    expect(logActionMock).not.toHaveBeenCalledWith('stock_status', expect.anything(), expect.anything(), expect.anything());
+  });
+
+  it('applies status and location together in one write, logging both', async () => {
+    await bulkUpdateUnits([{ serial: n(601), status: 'ready', location: 'EZTrans' }]);
+    expect(updateMock).toHaveBeenCalledTimes(1);
+    expect(updateMock).toHaveBeenCalledWith(expect.objectContaining({ status: 'ready', location: 'EZTrans' }));
+    expect(logActionMock).toHaveBeenCalledWith('stock_status', n(601), 'inbound → ready', expect.anything());
+    expect(logActionMock).toHaveBeenCalledWith('stock_edit', n(601), 'location: VentureLab → EZTrans', expect.anything());
+  });
+
+  it('de-duplicates serials and drops empty changes', async () => {
+    const res = await bulkUpdateUnits([
+      { serial: 'LL01-A', status: 'rework' }, { serial: 'LL01-A', status: 'rework' },
+      { serial: 'LL01-B', status: 'rework' }, { serial: 'LL01-C' },
+    ]);
     expect(res.updated).toEqual(['LL01-A', 'LL01-B']);
     expect(updateMock).toHaveBeenCalledTimes(2);
   });
@@ -208,9 +231,10 @@ describe('updateUnitsStatus', () => {
     }));
     const progress: number[] = [];
     try {
-      const res = await updateUnitsStatus(['LL01-A', 'LL01-B', 'LL01-C'], 'shipped', {
-        onProgress: done => progress.push(done),
-      });
+      const res = await bulkUpdateUnits(
+        ['LL01-A', 'LL01-B', 'LL01-C'].map(serial => ({ serial, status: 'shipped' as const })),
+        { onProgress: done => progress.push(done) },
+      );
       expect(res.updated).toEqual(['LL01-A', 'LL01-C']);
       expect(res.failed).toEqual([{ serial: 'LL01-B', message: 'guard rejected' }]);
       expect(logActionMock).not.toHaveBeenCalledWith('stock_status', 'LL01-B', expect.anything(), expect.anything());
@@ -221,7 +245,7 @@ describe('updateUnitsStatus', () => {
   });
 
   it('does nothing for an empty selection', async () => {
-    const res = await updateUnitsStatus([], 'ready');
+    const res = await bulkUpdateUnits([]);
     expect(res).toEqual({ updated: [], failed: [] });
     expect(updateMock).not.toHaveBeenCalled();
   });

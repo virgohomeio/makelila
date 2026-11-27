@@ -4,7 +4,7 @@ import {
   linkUnitToCustomer, serialsInRange, QC_CHECK_META,
   type Unit, type UnitStatus, type QcCheck,
 } from '../../lib/stock';
-import { BulkStatusModal } from './BulkStatusModal';
+import { BulkEditModal } from './BulkEditModal';
 import { useCustomers } from '../../lib/customers';
 import { matchUnitToCustomer, isAutoLinkable } from '../../lib/customerNameMatch';
 import {
@@ -21,11 +21,13 @@ import { UnitTimeline } from '../../components/UnitTimeline';
 import styles from './Stock.module.css';
 
 export function UnitTable({
-  units, macDupes = new Map(),
+  units, macDupes = new Map(), locationOptions = [],
 }: {
   units: Unit[];
   /** serial → other serials sharing its MAC (lib/stock findMacDuplicates). */
   macDupes?: Map<string, string[]>;
+  /** Suggestions for the bulk-edit location field. */
+  locationOptions?: string[];
 }) {
   // Preview-confirm pattern: pending status per row.
   // We keep a map of serial → pendingStatus so one row's edit doesn't clobber another's.
@@ -145,7 +147,7 @@ export function UnitTable({
         className={styles.btnPrimary}
         disabled={selectedUnits.length === 0}
         onClick={() => setShowBulk(true)}
-      >Change status…</button>
+      >Change status / location…</button>
     </div>
     <div className={styles.tableWrap}>
       {error && <div className={styles.errorBar}>{error}</div>}
@@ -337,8 +339,9 @@ export function UnitTable({
         />
       )}
       {showBulk && (
-        <BulkStatusModal
+        <BulkEditModal
           units={selectedUnits}
+          locationOptions={locationOptions}
           onClose={() => setShowBulk(false)}
           onDone={updated => setSelected(prev => {
             // Drop what moved; keep failures selected so they can be retried.

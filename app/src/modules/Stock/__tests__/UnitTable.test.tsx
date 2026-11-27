@@ -7,15 +7,15 @@ import { render, screen, fireEvent, waitFor, within } from '@testing-library/rea
 import type { Unit } from '../../../lib/stock';
 
 const updateUnitFields = vi.fn(async (..._args: unknown[]) => {});
-const updateUnitsStatus = vi.fn(async (serials: string[], ..._rest: unknown[]) => ({
-  updated: serials.filter(s => s !== 'LL01-00000000603'),
-  failed: serials.includes('LL01-00000000603')
+const bulkUpdateUnits = vi.fn(async (changes: Array<{ serial: string }>, ..._rest: unknown[]) => ({
+  updated: changes.map(c => c.serial).filter(s => s !== 'LL01-00000000603'),
+  failed: changes.some(c => c.serial === 'LL01-00000000603')
     ? [{ serial: 'LL01-00000000603', message: 'guard rejected' }] : [],
 }));
 vi.mock('../../../lib/stock', async () => ({
   ...await vi.importActual<typeof import('../../../lib/stock')>('../../../lib/stock'),
   updateUnitStatus: vi.fn(async () => {}),
-  updateUnitsStatus: (serials: string[], ...rest: unknown[]) => updateUnitsStatus(serials, ...rest),
+  bulkUpdateUnits: (changes: Array<{ serial: string }>, ...rest: unknown[]) => bulkUpdateUnits(changes, ...rest),
   updateUnitFields: (...args: unknown[]) => updateUnitFields(...args),
   linkUnitToCustomer: vi.fn(async () => {}),
 }));
@@ -101,25 +101,30 @@ describe('UnitTable — duplicate MAC', () => {
   });
 });
 
-describe('UnitTable — bulk status change', () => {
+describe('UnitTable — bulk status / location edit', () => {
   // Braces matter: a function returned from beforeEach is run as teardown.
-  beforeEach(() => { updateUnitsStatus.mockClear(); });
+  beforeEach(() => { bulkUpdateUnits.mockClear(); });
 
   const n = (num: number) => `LL01-${String(num).padStart(11, '0')}`;
   const fleet = () => [
     unit(n(600), { status: 'inbound' }),
-    unit(n(601), { status: 'inbound' }),
-    unit(n(602), { status: 'inbound', electrical_check: 'fail' }),
-    unit(n(603), { status: 'ca-test', customer_name: 'Jane Doe' }),
-    unit(n(604), { status: 'ready' }),
+    unit(n(601), { status: 'inbound', location: 'VentureLab' }),
+    unit(n(602), { status: 'inbound', electrical_check: 'fail', location: 'VentureLab' }),
+    unit(n(603), { status: 'ca-test', customer_name: 'Jane Doe', location: 'EZTrans' }),
+    unit(n(604), { status: 'ready', location: 'VentureLab' }),
     unit(n(800), { status: 'inbound' }),
   ];
   const checkbox = (serial: string) => screen.getByLabelText(`Select ${serial}`) as HTMLInputElement;
+  const BULK = 'Change status / location…';
 
   const selectRange = (from: string, to: string) => {
     fireEvent.change(screen.getByLabelText('Range from'), { target: { value: from } });
     fireEvent.change(screen.getByLabelText('Range to'), { target: { value: to } });
     fireEvent.click(screen.getByRole('button', { name: 'Select range' }));
+  };
+  const openBulk = () => {
+    fireEvent.click(screen.getByRole('button', { name: BULK }));
+    return screen.getByRole('dialog', { name: 'Bulk edit' });
   };
 
   it('selects a machine-number range, and says when part of it is not listed', () => {
@@ -140,44 +145,78 @@ describe('UnitTable — bulk status change', () => {
     expect(screen.getByText('0 selected')).toBeInTheDocument();
   });
 
-  it('previews then changes only the units that need it, skipping failed electrical by default', async () => {
+  it('status only: previews, then changes just the units that need it, skipping failed electrical', async () => {
     render(<UnitTable units={fleet()} />);
     selectRange('601', '604');
-    fireEvent.click(screen.getByRole('button', { name: 'Change status…' }));
-
-    const dialog = screen.getByRole('dialog', { name: 'Change status' });
+    const dialog = openBulk();
     fireEvent.change(within(dialog).getByLabelText('New status'), { target: { value: 'ready' } });
-    expect(within(dialog).getByText('1 already Ready — skipped')).toBeInTheDocument();
+    expect(within(dialog).getByText(/1 already Ready/)).toBeInTheDocument();
     expect(within(dialog).getByText(/1 has a failed electrical test/)).toBeInTheDocument();
     expect(within(dialog).getByText(/1 has a customer or order stamped/)).toBeInTheDocument();
 
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Change 2 to Ready' }));
-    await waitFor(() => expect(updateUnitsStatus).toHaveBeenCalled());
-    expect(updateUnitsStatus.mock.calls[0][0]).toEqual([n(601), n(603)]);
-    expect(updateUnitsStatus.mock.calls[0][1]).toBe('ready');
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Update 2 units' }));
+    await waitFor(() => expect(bulkUpdateUnits).toHaveBeenCalled());
+    expect(bulkUpdateUnits.mock.calls[0][0]).toEqual([
+      { serial: n(601), status: 'ready' }, { serial: n(603), status: 'ready' },
+    ]);
 
     // Result: one moved, one rejected — the rejected one stays selected.
-    expect(await within(dialog).findByText('Updated 1 unit to Ready.')).toBeInTheDocument();
+    expect(await within(dialog).findByText('Updated 1 unit.')).toBeInTheDocument();
     expect(within(dialog).getByText(/guard rejected/)).toBeInTheDocument();
     fireEvent.click(within(dialog).getByRole('button', { name: 'Done' }));
     expect(checkbox(n(601)).checked).toBe(false);
     expect(checkbox(n(603)).checked).toBe(true);
   });
 
-  it('includes failed-electrical units when the operator unticks Skip them', async () => {
-    render(<UnitTable units={fleet()} />);
-    selectRange('601', '602');
-    fireEvent.click(screen.getByRole('button', { name: 'Change status…' }));
-    const dialog = screen.getByRole('dialog', { name: 'Change status' });
-    fireEvent.change(within(dialog).getByLabelText('New status'), { target: { value: 'ready' } });
-    fireEvent.click(within(dialog).getByLabelText('Skip them'));
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Change 2 to Ready' }));
-    await waitFor(() => expect(updateUnitsStatus).toHaveBeenCalled());
-    expect(updateUnitsStatus.mock.calls[0][0]).toEqual([n(601), n(602)]);
+  it('location only: moves every unit not already there and leaves status alone', async () => {
+    render(<UnitTable units={fleet()} locationOptions={['VentureLab', 'EZTrans']} />);
+    selectRange('601', '604');
+    const dialog = openBulk();
+    fireEvent.change(within(dialog).getByLabelText('New location'), { target: { value: '  EZTrans ' } });
+    expect(within(dialog).getByText(/1 already there/)).toBeInTheDocument();
+    expect(within(dialog).getByText(/Shelf board are not changed/)).toBeInTheDocument();
+
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Update 3 units' }));
+    await waitFor(() => expect(bulkUpdateUnits).toHaveBeenCalled());
+    expect(bulkUpdateUnits.mock.calls[0][0]).toEqual([
+      { serial: n(601), location: 'EZTrans' },
+      { serial: n(602), location: 'EZTrans' },
+      { serial: n(604), location: 'EZTrans' },
+    ]);
   });
 
-  it('Change status is disabled with nothing selected', () => {
+  it('status + location: a failed-electrical unit still moves location but is not marked Ready', async () => {
     render(<UnitTable units={fleet()} />);
-    expect(screen.getByRole('button', { name: 'Change status…' })).toBeDisabled();
+    selectRange('601', '602');
+    const dialog = openBulk();
+    fireEvent.change(within(dialog).getByLabelText('New status'), { target: { value: 'ready' } });
+    fireEvent.change(within(dialog).getByLabelText('New location'), { target: { value: 'EZTrans' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Update 2 units' }));
+    await waitFor(() => expect(bulkUpdateUnits).toHaveBeenCalled());
+    expect(bulkUpdateUnits.mock.calls[0][0]).toEqual([
+      { serial: n(601), status: 'ready', location: 'EZTrans' },
+      { serial: n(602), location: 'EZTrans' },
+    ]);
+  });
+
+  it('marks failed-electrical units Ready too when the operator unticks the guard', async () => {
+    render(<UnitTable units={fleet()} />);
+    selectRange('601', '602');
+    const dialog = openBulk();
+    fireEvent.change(within(dialog).getByLabelText('New status'), { target: { value: 'ready' } });
+    fireEvent.click(within(dialog).getByLabelText("Don't mark them Ready"));
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Update 2 units' }));
+    await waitFor(() => expect(bulkUpdateUnits).toHaveBeenCalled());
+    expect(bulkUpdateUnits.mock.calls[0][0]).toEqual([
+      { serial: n(601), status: 'ready' }, { serial: n(602), status: 'ready' },
+    ]);
+  });
+
+  it('Update stays disabled until a status or location is chosen', () => {
+    render(<UnitTable units={fleet()} />);
+    expect(screen.getByRole('button', { name: BULK })).toBeDisabled();
+    selectRange('601', '601');
+    const dialog = openBulk();
+    expect(within(dialog).getByRole('button', { name: 'Update' })).toBeDisabled();
   });
 });

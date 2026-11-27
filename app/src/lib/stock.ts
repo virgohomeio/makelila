@@ -283,7 +283,7 @@ export async function updateUnitStatus(
   noteAppend?: string,
 ): Promise<void> {
   const userId = await currentUserId();
-  await applyUnitStatus(serial, newStatus, userId, noteAppend);
+  await applyUnitChange({ serial, status: newStatus }, userId, noteAppend);
 }
 
 /** Trailing machine number of a serial: 'LL01-00000000601' → 601. Null when
@@ -307,40 +307,57 @@ export function serialsInRange(units: Pick<Unit, 'serial'>[], from: number, to: 
     .map(u => u.serial);
 }
 
-export type BulkStatusResult = {
+export type BulkResult = {
   updated: string[];
   failed: Array<{ serial: string; message: string }>;
 };
 
-/** Change many machines to one status. Each unit goes through exactly the
- *  same write as the per-row dropdown (applyUnitStatus) — status_updated_by,
- *  the release-to-ready customer clear, and one activity-log entry per unit —
- *  so a bulk change leaves the same audit trail as clicking every row.
+/** One unit's part of a bulk edit. Omit a field to leave it alone. */
+export type UnitChange = {
+  serial: string;
+  status?: UnitStatus;
+  location?: string;
+};
+
+/** Apply per-unit status and/or location changes to many machines. A status
+ *  goes through exactly the same write as the per-row dropdown —
+ *  status_updated_by, the release-to-ready customer clear, a `stock_status`
+ *  log entry — and a location gets a `stock_edit` entry naming old → new, so a
+ *  bulk edit leaves the same audit trail as editing every row by hand.
+ *
+ *  Location here is units.location — what Stock shows, and what the per-row
+ *  Assignment editor writes. The Shelf board reads shelf_slots.location, which
+ *  is per skid/pallet, and this does not touch it.
  *
  *  Deliberately per-unit rather than one `.in('serial', …)` update: a DB guard
  *  rejecting one machine would otherwise fail the whole statement, and the
  *  operator needs to know *which* units didn't move. Failures are collected,
  *  never thrown, so one bad unit can't strand the rest half-done. */
-export async function updateUnitsStatus(
-  serials: string[],
-  newStatus: UnitStatus,
+export async function bulkUpdateUnits(
+  changes: UnitChange[],
   opts: { concurrency?: number; onProgress?: (done: number, total: number) => void } = {},
-): Promise<BulkStatusResult> {
+): Promise<BulkResult> {
   const userId = await currentUserId();
-  const queue = [...new Set(serials)];
+  // Last change per serial wins; drop ones that would change nothing.
+  const bySerial = new Map<string, UnitChange>();
+  for (const c of changes) {
+    if (c.status === undefined && c.location === undefined) continue;
+    bySerial.set(c.serial, c);
+  }
+  const queue = [...bySerial.values()];
   const total = queue.length;
-  const result: BulkStatusResult = { updated: [], failed: [] };
+  const result: BulkResult = { updated: [], failed: [] };
   let done = 0;
   let next = 0;
 
   const worker = async () => {
     while (next < queue.length) {
-      const serial = queue[next++];
+      const change = queue[next++];
       try {
-        await applyUnitStatus(serial, newStatus, userId);
-        result.updated.push(serial);
+        await applyUnitChange(change, userId);
+        result.updated.push(change.serial);
       } catch (e) {
-        result.failed.push({ serial, message: (e as Error).message ?? String(e) });
+        result.failed.push({ serial: change.serial, message: (e as Error).message ?? String(e) });
       }
       done++;
       opts.onProgress?.(done, total);
@@ -350,35 +367,42 @@ export async function updateUnitsStatus(
   const n = Math.max(1, Math.min(opts.concurrency ?? 5, total));
   await Promise.all(Array.from({ length: n }, worker));
   // Workers finish out of order; report in the order the operator selected.
-  const order = new Map(queue.map((s, i) => [s, i]));
+  const order = new Map(queue.map((c, i) => [c.serial, i]));
   result.updated.sort((a, b) => order.get(a)! - order.get(b)!);
   result.failed.sort((a, b) => order.get(a.serial)! - order.get(b.serial)!);
   return result;
 }
 
-async function applyUnitStatus(
-  serial: string,
-  newStatus: UnitStatus,
+async function applyUnitChange(
+  change: UnitChange,
   userId: string,
   noteAppend?: string,
 ): Promise<void> {
+  const { serial, status, location } = change;
   const { data: existing } = await supabase
-    .from('units').select('notes, status').eq('serial', serial).single();
-  const nextNotes = noteAppend
-    ? [existing?.notes ?? '', noteAppend].filter(Boolean).join('\n')
-    : existing?.notes ?? null;
-  const { error } = await supabase
-    .from('units')
-    .update({
-      status: newStatus,
+    .from('units').select('notes, status, location').eq('serial', serial).single();
+  const patch: Record<string, unknown> = {};
+  if (status !== undefined) {
+    const nextNotes = noteAppend
+      ? [existing?.notes ?? '', noteAppend].filter(Boolean).join('\n')
+      : existing?.notes ?? null;
+    Object.assign(patch, {
+      status,
       status_updated_by: userId,
       notes: nextNotes,
-      ...releasePatchFor(newStatus),
-    })
-    .eq('serial', serial);
+      ...releasePatchFor(status),
+    });
+  }
+  if (location !== undefined) patch.location = location;
+  const { error } = await supabase.from('units').update(patch).eq('serial', serial);
   if (error) throw error;
-  await logAction('stock_status', serial, `${existing?.status ?? '?'} → ${newStatus}`,
-    { entityType: 'unit', unitSerial: serial });
+  const refs = { entityType: 'unit' as const, unitSerial: serial };
+  if (status !== undefined) {
+    await logAction('stock_status', serial, `${existing?.status ?? '?'} → ${status}`, refs);
+  }
+  if (location !== undefined) {
+    await logAction('stock_edit', serial, `location: ${existing?.location ?? '—'} → ${location}`, refs);
+  }
 }
 
 /** Backlog #69 — explicitly link an unmatched unit to a canonical customer
