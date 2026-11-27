@@ -6,6 +6,7 @@ import {
 } from '../../lib/stock';
 import { BatchCards } from './BatchCards';
 import { UnitTable } from './UnitTable';
+import { SHELF_SECTIONS } from '../../lib/fulfillment';
 import { TestReportUploader } from './TestReportUploader';
 import { NewBatchModal } from './NewBatchModal';
 import { useAuth } from '../../lib/auth';
@@ -29,6 +30,18 @@ export function UnitsTab() {
   // Units whose MAC is also on another unit — derived every render from the
   // loaded list, so fixing either unit's MAC clears the flag on both.
   const macDupes = useMemo(() => findMacDuplicates(units), [units]);
+  // Bulk-edit location suggestions: the shelf sites (so a move to e.g. EZTrans
+  // is spelled the way the Shelf + EZ Trans flows expect), then every location
+  // already on a unit, most common first.
+  const locationOptions = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const u of units) {
+      const l = u.location?.trim();
+      if (l) counts.set(l, (counts.get(l) ?? 0) + 1);
+    }
+    const existing = [...counts.entries()].sort((a, b) => b[1] - a[1]).map(([l]) => l);
+    return [...new Set([...SHELF_SECTIONS.map(s => s.location), ...existing])];
+  }, [units]);
 
   const [batchFilter, setBatchFilter] = useState<string | null>(null);
   const [categoryFilter, setCategoryFilter] = useState<CategoryFilter>('all');
@@ -152,7 +165,7 @@ export function UnitsTab() {
 
       <TestReportUploader validSerials={validSerials} macOwners={macOwners} />
 
-      <UnitTable units={filtered} macDupes={macDupes} />
+      <UnitTable units={filtered} macDupes={macDupes} locationOptions={locationOptions} />
     </div>
   );
 }
