@@ -1,7 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 
-const { confirmLabelMock, saveStarterMock, skipStarterMock, unskipStarterMock } = vi.hoisted(() => ({
+const { confirmLabelMock, saveStarterMock, skipStarterMock, unskipStarterMock, orderedMock } = vi.hoisted(() => ({
+  orderedMock: vi.fn((_id: string, _ordered: boolean, _refs?: unknown) => Promise.resolve(null as string | null)),
   // Typed with its real signature so the patch argument can be asserted on.
   confirmLabelMock: vi.fn((_id: string, _patch: Record<string, unknown>) => Promise.resolve()),
   saveStarterMock: vi.fn((_id: string, _tracking: string) => Promise.resolve()),
@@ -21,6 +22,7 @@ vi.mock('../../../lib/starterKit', async () => {
   return {
     ...actual,
     saveStarterTracking: saveStarterMock,
+    setStarterOrdered: orderedMock,
     skipStarterKit: skipStarterMock,
     unskipStarterKit: unskipStarterMock,
   };
@@ -88,14 +90,14 @@ describe('StepLabel — the compost starter is part of scheduling the pickup', (
     render(<StepLabel row={labelled} order={order('US')} />);
 
     expect(screen.getByRole('button', { name: /Pickup scheduled/ })).toBeDisabled();
-    expect(screen.getByTestId('step-blockers')).toHaveTextContent(/compost starter/i);
+    expect(screen.getByTestId('step-blockers')).toHaveTextContent(/starter soil/i);
   });
 
   it('holds a CA sale too — the starter was never a US-only product', () => {
     render(<StepLabel row={labelled} order={order('CA')} />);
 
     expect(screen.getByRole('button', { name: /Pickup scheduled/ })).toBeDisabled();
-    expect(screen.getByTestId('step-blockers')).toHaveTextContent(/compost starter/i);
+    expect(screen.getByTestId('step-blockers')).toHaveTextContent(/starter soil/i);
   });
 
   it('names it alongside the Freightcom fields, not instead of them', () => {
@@ -104,37 +106,29 @@ describe('StepLabel — the compost starter is part of scheduling the pickup', (
     const blockers = screen.getByTestId('step-blockers');
     expect(blockers).toHaveTextContent(/carrier/i);
     expect(blockers).toHaveTextContent(/tracking number/i);
-    expect(blockers).toHaveTextContent(/compost starter/i);
+    expect(blockers).toHaveTextContent(/starter soil/i);
   });
 
-  it('opens the step once the Amazon number is typed, and saves it', async () => {
+  it('opens the step once "Starter soil ordered" is ticked, and saves the tick', async () => {
     render(<StepLabel row={labelled} order={order('US')} />);
 
-    fireEvent.change(screen.getByTestId('starter-tracking-input'), {
-      target: { value: 'TBA303011917292' },
-    });
+    fireEvent.click(screen.getByTestId('starter-ordered-checkbox'));
+    await waitFor(() => expect(orderedMock).toHaveBeenCalledWith('q-1', true, expect.anything()));
 
-    const btn = screen.getByRole('button', { name: /Pickup scheduled/ });
-    expect(btn).toBeEnabled();
+    const btn = await screen.findByRole('button', { name: /Pickup scheduled/ });
+    await waitFor(() => expect(btn).toBeEnabled());
     fireEvent.click(btn);
 
     await waitFor(() => expect(confirmLabelMock).toHaveBeenCalledWith('q-1', expect.objectContaining({
       carrier: 'UPS',
       tracking_num: '1Z2985EADK98125759',
-      starter_tracking_num: 'TBA303011917292',
     })));
   });
 
-  // The number gates the Goorooship email, which goes out before this step
-  // ends — so it has to be on the row before Confirm, not at it.
-  it('writes the number to the row as soon as the field is left', async () => {
+  it('has no tracking-number field for the soil any more', () => {
     render(<StepLabel row={labelled} order={order('CA')} />);
-
-    const input = screen.getByTestId('starter-tracking-input');
-    fireEvent.change(input, { target: { value: 'TBA303011917292' } });
-    fireEvent.blur(input);
-
-    await waitFor(() => expect(saveStarterMock).toHaveBeenCalledWith('q-1', 'TBA303011917292'));
+    expect(screen.queryByTestId('starter-tracking-input')).toBeNull();
+    expect(screen.getByTestId('starter-ordered-checkbox')).not.toBeChecked();
   });
 
   it('takes a number already on the row as the answer', () => {
@@ -179,11 +173,11 @@ describe('StepLabel — an order that ships no starter is not stranded', () => {
   it('lets a sale through on a declared exemption, with a reason', async () => {
     render(<StepLabel row={labelled} order={order('US')} />);
 
-    fireEvent.click(screen.getByRole('button', { name: /ships no starter soil/i }));
+    fireEvent.click(screen.getByRole('button', { name: /No soil needed/i }));
     fireEvent.change(screen.getByTestId('starter-skip-reason'), {
       target: { value: 'customer already has one from #1142' },
     });
-    fireEvent.click(screen.getByRole('button', { name: /Record this and carry on/i }));
+    fireEvent.click(screen.getByRole('button', { name: /^Save$/ }));
 
     await waitFor(() => expect(skipStarterMock).toHaveBeenCalledWith(
       'q-1', 'customer already has one from #1142',
@@ -198,8 +192,8 @@ describe('StepLabel — an order that ships no starter is not stranded', () => {
   it('will not record an exemption with no reason', () => {
     render(<StepLabel row={labelled} order={order('US')} />);
 
-    fireEvent.click(screen.getByRole('button', { name: /ships no starter soil/i }));
-    expect(screen.getByRole('button', { name: /Record this and carry on/i })).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: /No soil needed/i }));
+    expect(screen.getByRole('button', { name: /^Save$/ })).toBeDisabled();
     expect(skipStarterMock).not.toHaveBeenCalled();
   });
 
@@ -235,7 +229,7 @@ describe('StepLabel — an EZ Trans carton needs the Goorooship email first', ()
     const blockers = screen.getByTestId('step-blockers');
     expect(blockers).toHaveTextContent(/carrier/i);
     expect(blockers).toHaveTextContent(/tracking number/i);
-    expect(blockers).toHaveTextContent(/compost starter/i);
+    expect(blockers).toHaveTextContent(/starter soil/i);
     expect(blockers).toHaveTextContent(/Goorooship email/i);
   });
 
@@ -295,7 +289,7 @@ describe('StepLabel — a Freightcom carton needs its booking confirmed first', 
     const blockers = screen.getByTestId('step-blockers');
     expect(blockers).toHaveTextContent(/carrier/i);
     expect(blockers).toHaveTextContent(/tracking number/i);
-    expect(blockers).toHaveTextContent(/compost starter/i);
+    expect(blockers).toHaveTextContent(/starter soil/i);
     expect(blockers).toHaveTextContent(/Freightcom booking/i);
   });
 

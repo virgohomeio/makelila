@@ -1,50 +1,88 @@
 import { describe, it, expect } from 'vitest';
-// ?raw so this reads the committed migration itself, not a copy of it — the
-// same trick tokens.test.ts uses, and it keeps @types/node out of the build.
-import migrationSql from '../../../supabase/migrations/20260923120000_shipment_confirmation_editable.sql?raw';
 import { textToEmailHtml } from '../../../supabase/functions/_shared/emailHtml.ts';
+import {
+  ONBOARDING_EMAIL_DEFAULT,
+  ONBOARDING_SMS_DEFAULT,
+  renderPlaceholders,
+  unfilledPlaceholders,
+} from '../../../supabase/functions/_shared/onboardingEmail.ts';
 import {
   LOVELY_INSTALL_GUIDE_URL,
   SHIPMENT_EMAIL_DEFAULT,
+  SHIPMENT_EMAIL_TEMPLATE_KEY,
   SHIPMENT_EMAIL_VARIABLES,
+  SHIPMENT_SMS_DEFAULT,
   unsupportedVariables,
 } from './shipmentEmailTemplate';
 
 describe('SHIPMENT_EMAIL_DEFAULT', () => {
-  it('carries both onboarding booking links', () => {
-    expect(SHIPMENT_EMAIL_DEFAULT.body).toContain('https://calendly.com/lila-ed/intro-call');
-    expect(SHIPMENT_EMAIL_DEFAULT.body)
-      .toContain('https://calendly.com/lila-ed/lila-onboarding-with-danica-patrik');
+  it('has the shipping-information subject', () => {
+    expect(SHIPMENT_EMAIL_DEFAULT.subject).toBe('Important Information For Your LILA Shipment');
   });
 
-  it('no longer uses the bare Calendly profile URL', () => {
-    // https://calendly.com/lila-ed was a profile page, not a bookable event.
-    expect(SHIPMENT_EMAIL_DEFAULT.body).not.toMatch(/calendly\.com\/lila-ed[.\s]/);
+  it('carries the shipping details and tracking', () => {
+    const body = SHIPMENT_EMAIL_DEFAULT.body;
+    expect(body).toContain('{{carrier}}');
+    expect(body).toContain('{{tracking_num}}');
+    expect(body).toContain('{{tracking_url}}');
+    expect(body).toContain('{{starter_block}}');
+  });
+
+  it('tells the customer a signature is required', () => {
+    expect(SHIPMENT_EMAIL_DEFAULT.body).toMatch(/signature is required/i);
+  });
+
+  it('leaves the Lovely App and onboarding-call instructions to the next-day email', () => {
+    const body = SHIPMENT_EMAIL_DEFAULT.body;
+    expect(body).not.toContain('calendly.com');
+    expect(body).not.toContain('lilalovely.io');
+    expect(body).not.toContain(LOVELY_INSTALL_GUIDE_URL);
   });
 
   it('only uses placeholders the renderer can fill', () => {
     expect(unsupportedVariables(SHIPMENT_EMAIL_DEFAULT)).toEqual([]);
   });
 
-  it('tells the customer how to install Lovely on both platforms', () => {
-    const body = SHIPMENT_EMAIL_DEFAULT.body;
-    expect(body).toContain('Before you set up your LILA: get the Lovely App');
+  it('reads its override from a new key, not the old combined template', () => {
+    expect(SHIPMENT_EMAIL_TEMPLATE_KEY).not.toBe('shipment_confirmation');
+  });
+});
+
+describe('SHIPMENT_SMS_DEFAULT', () => {
+  it('condenses the same tracking and signature information', () => {
+    expect(SHIPMENT_SMS_DEFAULT).toContain('{{tracking_num}}');
+    expect(SHIPMENT_SMS_DEFAULT).toContain('{{tracking_url}}');
+    expect(SHIPMENT_SMS_DEFAULT).toMatch(/signature is required/i);
+    expect(unsupportedVariables({ subject: '', body: SHIPMENT_SMS_DEFAULT })).toEqual([]);
+  });
+});
+
+describe('ONBOARDING_EMAIL_DEFAULT (next-day email)', () => {
+  it('has the ACTION NEEDED subject', () => {
+    expect(ONBOARDING_EMAIL_DEFAULT.subject).toBe('ACTION NEEDED: Onboarding Instructions for your LILA');
+  });
+
+  it('carries the Lovely App sign-in and both onboarding booking links', () => {
+    const body = ONBOARDING_EMAIL_DEFAULT.body;
     expect(body).toContain('lilalovely.io');
     expect(body).toMatch(/iPhone[\s\S]*Safari/);
     expect(body).toMatch(/Android[\s\S]*Chrome/);
+    expect(body).toContain('https://calendly.com/lila-ed/intro-call');
+    expect(body).toContain('https://calendly.com/lila-ed/lila-onboarding-with-danica-patrik');
+    expect(body.indexOf('Lovely App')).toBeLessThan(body.indexOf('onboarding call'));
   });
 
   it('puts the install guide on a line of its own so it sends as a picture', () => {
-    // The whole image mechanism hinges on this line standing alone. A stray
-    // word on it would quietly turn the guide back into a bare link.
-    expect(SHIPMENT_EMAIL_DEFAULT.body.split('\n')).toContain(LOVELY_INSTALL_GUIDE_URL);
-    expect(textToEmailHtml(SHIPMENT_EMAIL_DEFAULT.body))
+    expect(ONBOARDING_EMAIL_DEFAULT.body.split('\n')).toContain(LOVELY_INSTALL_GUIDE_URL);
+    expect(textToEmailHtml(ONBOARDING_EMAIL_DEFAULT.body))
       .toContain(`<img src="${LOVELY_INSTALL_GUIDE_URL}"`);
   });
 
-  it('puts the app ahead of the onboarding session it is needed for', () => {
-    const body = SHIPMENT_EMAIL_DEFAULT.body;
-    expect(body.indexOf('get the Lovely App')).toBeLessThan(body.indexOf('Important next steps'));
+  it('fills every placeholder in the email and the text', () => {
+    const vars = { customer_first_name: 'Ada', order_ref: '#1300' };
+    for (const t of [ONBOARDING_EMAIL_DEFAULT.subject, ONBOARDING_EMAIL_DEFAULT.body, ONBOARDING_SMS_DEFAULT]) {
+      expect(unfilledPlaceholders(renderPlaceholders(t, vars))).toEqual([]);
+    }
   });
 });
 
@@ -66,24 +104,5 @@ describe('unsupportedVariables', () => {
       subject: '{{nope}}',
       body: '{{nope}} {{nope}} {{also_nope}}',
     }).sort()).toEqual(['also_nope', 'nope']);
-  });
-});
-
-describe('migration 20260923120000', () => {
-  // The migration is gated behind a manual workflow, so it may run long after
-  // the code ships. If it ever does run it must produce exactly the wording
-  // the app already uses, or the stored row would silently change the email.
-  const sql = migrationSql;
-  const update = sql.slice(sql.indexOf('update public.email_templates'), sql.indexOf('where key = '));
-  const unquote = (s: string) => s.replace(/''/g, "'");
-
-  it('seeds the same body the app defaults to', () => {
-    const body = unquote(/\n {2}body =\s*\n?'([\s\S]*?)',\n {2}variables/.exec(update)![1]);
-    expect(body).toBe(SHIPMENT_EMAIL_DEFAULT.body);
-  });
-
-  it('seeds the same subject', () => {
-    const subject = unquote(/\n {2}subject = '(.*?)',\n/.exec(update)![1]);
-    expect(subject).toBe(SHIPMENT_EMAIL_DEFAULT.subject);
   });
 });

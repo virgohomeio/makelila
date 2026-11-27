@@ -1,22 +1,64 @@
 import { useMemo, useState, type CSSProperties } from 'react';
 import { useAllOrders, type Order } from '../../lib/orders';
-import { useFbCampaigns, useFbDemographics, type FbCampaign } from '../../lib/marketing/facebook';
+import { useFbCampaigns, useFbDemographics, useFbAds, type FbCampaign } from '../../lib/marketing/facebook';
 import {
-  buildSalesReport, salesRowsToCsv, reportCells, REPORT_COLUMNS, UNKNOWN,
-  useCustomerAttribution, type Attribution, type Demo,
+  buildSalesReport, salesRowsToCsv, reportCells, REPORT_COLUMNS, UNKNOWN, SHOPIFY_WEBSITE,
+  useCustomerAttribution, isTestOrder, isRealSale, type Attribution, type Demo,
 } from '../../lib/marketing/salesReport';
 import { useKlaviyoJourneys, summarizeJourney } from '../../lib/marketing/journeyTiming';
-import { buildCampaignGroups } from '../../lib/marketing/campaignGroups';
+import { buildCampaignGroups, groupMatchesName } from '../../lib/marketing/campaignGroups';
+import { useGoogleAds, sumGoogleAds } from '../../lib/marketing/googleAds';
 
 const subtle = 'var(--color-ink-subtle)';
 const muted = 'var(--color-ink-muted)';
 
-const RANGES = [
-  { label: 'Last 30 days', days: 30 },
-  { label: 'Last 60 days', days: 60 },
-  { label: 'Last 90 days', days: 90 },
-  { label: 'All time', days: 0 },
+// Meta age brackets in order, with a midpoint for the weighted-average age. Same
+// buckets the Demographics tab uses, so the two agree.
+const AGE_ORDER = ['13-17', '18-24', '25-34', '35-44', '45-54', '55-64', '65+'];
+const AGE_MID: Record<string, number> = {
+  '13-17': 15, '18-24': 21, '25-34': 29.5, '35-44': 39.5, '45-54': 49.5, '55-64': 59.5, '65+': 70,
+};
+
+// Column index of the Full Refund? flag, so the table can give a full refund a
+// crimson highlight (and mute the "No") without hard-coding a position.
+const REFUND_COL = REPORT_COLUMNS.indexOf('Full Refund?');
+// Column index of the Sale Source, so an external reseller sale (anything that
+// isn't our own website) can be colour-highlighted without a hard-coded index.
+const SOURCE_COL = REPORT_COLUMNS.indexOf('Sale Source');
+
+// Date-range options for the report's KPI/summary + order list. 'all' = every
+// sale; 'today'/'yesterday' = that single EST calendar day; the numeric keys are
+// rolling windows of N calendar days ending today (inclusive).
+const RANGES: { key: string; label: string }[] = [
+  { key: 'all', label: 'All time' },
+  { key: 'today', label: 'Today' },
+  { key: 'yesterday', label: 'Yesterday' },
+  { key: '7', label: 'Last 7 days' },
+  { key: '14', label: 'Last 14 days' },
+  { key: '30', label: 'Last 30 days' },
+  { key: '60', label: 'Last 60 days' },
+  { key: '90', label: 'Last 90 days' },
+  { key: '365', label: 'Last 365 days' },
+  { key: 'custom', label: 'Custom range…' },
 ];
+
+// fb_ads holds ~120 days of daily ad-level rows, so any window whose start is
+// within this many days is fully covered there (accurate per-day Meta spend);
+// older/unbounded windows fall back to the lifetime fb_campaigns totals.
+const FB_ADS_COVERAGE_DAYS = 120;
+
+/** The creative code an operator recognises (v28a, v13a…) pulled out of a Meta
+ *  ad name or a utm_content string. Prefers a code WITH a trailing letter — an
+ *  ad VERSION like "v1" has none — so "Fall 2026 v1 - v28a" → "v28a". Takes the
+ *  last such code; null when there's no recognisable creative code. */
+function creativeLabel(s: string | null): string | null {
+  if (!s) return null;
+  const lettered = [...s.matchAll(/\bv\d+[a-z]\b/gi)];
+  if (lettered.length) return lettered[lettered.length - 1][0].toLowerCase();
+  const any = [...s.matchAll(/\bv\d+[a-z]?\b/gi)];
+  if (any.length) return any[any.length - 1][0].toLowerCase();
+  return null;
+}
 
 export function ReportTab() {
   const { orders, loading: ordersLoading } = useAllOrders();
@@ -24,17 +66,46 @@ export function ReportTab() {
   const { byCustomer: journeys } = useKlaviyoJourneys();
   const { campaigns } = useFbCampaigns(365);
   const { demographics } = useFbDemographics();
-  const [days, setDays] = useState(0);   // default: All time — show every sale
+  const { ads } = useFbAds();
+  const { rows: googleRows } = useGoogleAds();
+  const [rangeKey, setRangeKey] = useState('all');   // default: All time — show every sale
+  const [customStart, setCustomStart] = useState('');   // YYYY-MM-DD, used when rangeKey === 'custom'
+  const [customEnd, setCustomEnd] = useState('');
   const [campaignFilter, setCampaignFilter] = useState('all');
   const [pageSize, setPageSize] = useState(20);
   const [page, setPage] = useState(0);
 
-  const cutoff = useMemo(() => (days ? Date.now() - days * 86_400_000 : 0), [days]);
+  // The selected date window as inclusive EST YYYY-MM-DD bounds (null = unbounded
+  // = all time). `daily` says the window is short enough to source Meta spend
+  // from fb_ads (daily) rather than the lifetime fb_campaigns totals.
+  const dayStr = (ms: number) => new Date(ms).toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
+  const range = useMemo(() => {
+    const now = Date.now();
+    const today = dayStr(now);
+    // Earliest day fb_ads still covers — a window starting on/after it can use
+    // the accurate daily rows; an earlier start falls back to lifetime totals.
+    const coverFrom = dayStr(now - FB_ADS_COVERAGE_DAYS * 86_400_000);
+    if (rangeKey === 'all') return { start: null as string | null, end: null as string | null, daily: false };
+    if (rangeKey === 'custom') {
+      if (!customStart && !customEnd) return { start: null as string | null, end: null as string | null, daily: false };
+      // Allow start or end alone; order them defensively if both given reversed.
+      let s = customStart || '0000-01-01';
+      let e = customEnd || today;
+      if (s > e) { const t = s; s = e; e = t; }
+      return { start: s, end: e, daily: s >= coverFrom };
+    }
+    if (rangeKey === 'today') return { start: today, end: today, daily: true };
+    if (rangeKey === 'yesterday') { const y = dayStr(now - 86_400_000); return { start: y, end: y, daily: true }; }
+    const n = Number(rangeKey);
+    const start = dayStr(now - (n - 1) * 86_400_000);
+    return { start, end: today, daily: n <= FB_ADS_COVERAGE_DAYS };
+  }, [rangeKey, customStart, customEnd]);
 
   const inRange = (iso: string | null | undefined) => {
-    if (!cutoff) return true;
+    if (!range.start) return true;               // all time
     if (!iso) return false;
-    return new Date(iso).getTime() >= cutoff;
+    const d = dayStr(new Date(iso).getTime());
+    return d >= range.start && d <= range.end!;
   };
 
   // Curated sale groups (each = many Meta campaigns), piled chronologically:
@@ -69,14 +140,66 @@ export function ReportTab() {
     return [...m.values(), ...noId];
   }, [campaigns]);
 
-  const adSpendCad = useMemo(() => {
-    // Group spend (all its Meta campaigns) when a group is picked; else range total.
-    if (selectedGroup) return uniqueCampaigns.filter(c => c.campaign_id && selectedGroup.ids.has(c.campaign_id)).reduce((s, c) => s + (c.spend_cad ?? 0), 0);
-    return uniqueCampaigns.filter(c => inRange(c.date_start)).reduce((s, c) => s + (c.spend_cad ?? 0), 0);
-  }, [uniqueCampaigns, cutoff, selectedGroup]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Per-platform spend + conversions for the selected scope: Meta and Google
+  // (google_ads_campaigns), separate and blended. Conversions are each platform's
+  // OWN reported conversions (Meta website purchases, Google conversions). Total
+  // ad spend here drives the blended CAC/ROAS/ROI below.
+  //
+  // Meta source depends on the window: a campaign GROUP or an unbounded / long
+  // (>120-day) window uses the lifetime fb_campaigns totals; a short bounded
+  // window (today … last 90 days) uses the daily ad-level fb_ads rows so spend +
+  // conversions reflect exactly that date range (fb_campaigns has no daily
+  // breakdown — its date_start is a lifetime boundary, so it can't be filtered).
+  const platform = useMemo(() => {
+    let metaSpend = 0;
+    let metaConversions = 0;
+    let metaValue = 0;   // Meta's own reported purchase value → Meta ROAS.
+    if (selectedGroup) {
+      const gc = uniqueCampaigns.filter(c => c.campaign_id && selectedGroup.ids.has(c.campaign_id));
+      metaSpend = gc.reduce((s, c) => s + (c.spend_cad ?? 0), 0);
+      metaConversions = gc.reduce((s, c) => s + (c.metrics?.website_purchases ?? 0), 0);
+      metaValue = gc.reduce((s, c) => s + (c.metrics?.website_purchases_value ?? 0), 0);
+    } else if (range.daily && range.start) {
+      // Short bounded window → sum daily ad-level rows within [start, end].
+      for (const ad of ads) {
+        if (!ad.date_start) continue;
+        const d = ad.date_start.slice(0, 10);
+        if (d < range.start || d > range.end!) continue;
+        metaSpend += ad.spend_cad ?? 0;
+        metaConversions += ad.purchases ?? 0;
+        metaValue += ad.purchases_value ?? 0;
+      }
+    } else {
+      // All time, or a window too long for fb_ads coverage → lifetime totals.
+      metaSpend = uniqueCampaigns.reduce((s, c) => s + (c.spend_cad ?? 0), 0);
+      metaConversions = uniqueCampaigns.reduce((s, c) => s + (c.metrics?.website_purchases ?? 0), 0);
+      metaValue = uniqueCampaigns.reduce((s, c) => s + (c.metrics?.website_purchases_value ?? 0), 0);
+    }
+    // Google date window, aligned to the selected group / range.
+    const gStart = selectedGroup ? selectedGroup.startDate : range.start;
+    const gEnd = selectedGroup ? (selectedGroup.endDate ?? dayStr(Date.now())) : range.end;
+    // For a specific sale group, sum ONLY that group's Google campaigns (by the
+    // same name matcher Meta uses), not every campaign that ran in the window —
+    // otherwise an always-on PMax / brand campaign bleeds into the sale's spend.
+    // A plain date range (no group) still blends all Google spend for the period.
+    const g = sumGoogleAds(
+      googleRows, gStart, gEnd,
+      selectedGroup ? (name) => groupMatchesName(selectedGroup, name) : undefined,
+    );
+    // Per-platform ROAS = that platform's OWN reported conversion value / spend.
+    return {
+      metaSpend, metaConversions, metaCac: metaConversions ? metaSpend / metaConversions : null,
+      metaValue, metaRoas: metaSpend && metaValue ? metaValue / metaSpend : null,
+      googleSpend: g.spend, googleConversions: g.conversions, googleValue: g.value, googleHasData: g.hasData,
+      googleCac: g.conversions ? g.spend / g.conversions : null,
+      googleRoas: g.spend && g.value ? g.value / g.spend : null,
+      totalSpend: metaSpend + g.spend,
+      totalConversions: metaConversions + g.conversions,
+    };
+  }, [uniqueCampaigns, ads, selectedGroup, range, googleRows]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const { rows, kpis } = useMemo(() => {
-    const filtered = orders.filter(o => o.kind !== 'replacement' && inScope(o));
+    const filtered = orders.filter(o => o.kind !== 'replacement' && !isTestOrder(o) && isRealSale(o) && inScope(o));
     const resolve = (o: Order): Attribution =>
       // Prefer the order's own Shopify attribution (google organic, meta, …);
       // fall back to the customer's first-touch, then unknown.
@@ -117,7 +240,7 @@ export function ReportTab() {
     }
     const salesByDate = new Map<string, number>();
     for (const o of orders) {
-      if (o.kind === 'replacement') continue;
+      if (o.kind === 'replacement' || isTestOrder(o) || !isRealSale(o)) continue;
       const dt = estDate(o.placed_at ?? o.created_at);
       salesByDate.set(dt, (salesByDate.get(dt) ?? 0) + 1);
     }
@@ -135,6 +258,49 @@ export function ReportTab() {
       return { age: null, gender: null };
     };
 
+    // Best-effort exact ad creative: the SAME clean-day match as age/gender, but
+    // over Meta's per-ad purchases — if a day had exactly ONE Shopify sale AND
+    // exactly ONE creative recorded exactly ONE purchase that day, that's the
+    // creative the buyer saw (e.g. "v20c"). Exclude Mini (Shopline, not Shopify).
+    const creativeByDate = new Map<string, Map<string, number>>();
+    for (const ad of ads) {
+      if (!ad.date_start || !ad.purchases) continue;
+      if (/\bmini\b/i.test(ad.campaign_name ?? '')) continue;
+      const label = creativeLabel(ad.ad_name);
+      if (!label) continue;
+      const m = creativeByDate.get(ad.date_start) ?? new Map<string, number>();
+      m.set(label, (m.get(label) ?? 0) + (ad.purchases ?? 0));
+      creativeByDate.set(ad.date_start, m);
+    }
+    // utm_content is sometimes the creative string ("Fall 2026 v1 - v28a") and
+    // sometimes the numeric Meta ad id (e.g. 120250118728320739). Map ad id → ad
+    // name via fb_ads so either form resolves to the creative code.
+    const adNameById = new Map<string, string>();
+    for (const ad of ads) if (ad.ad_id && ad.ad_name) adNameById.set(ad.ad_id, ad.ad_name);
+    const creativeFromContent = (content: string | null): string | null => {
+      const direct = creativeLabel(content);
+      if (direct) return direct;
+      const id = (content ?? '').trim();
+      if (/^\d+$/.test(id)) return creativeLabel(adNameById.get(id) ?? null);
+      return null;
+    };
+    const creativeOf = (o: Order): string | null => {
+      // Deterministic first: the ad creative from the order's OWN utm_content —
+      // either the creative string or the Meta ad id (resolved via fb_ads).
+      const fromContent = creativeFromContent(o.attribution_content);
+      if (fromContent) return fromContent;
+      // Fallback for older orders with no utm_content: the best-effort clean-day
+      // match from Meta's per-ad purchases.
+      const dt = estDate(o.placed_at ?? o.created_at);
+      const dayAds = creativeByDate.get(dt);
+      if (!dayAds) return null;
+      const total = Array.from(dayAds.values()).reduce((a, b) => a + b, 0);
+      const distinct = Array.from(dayAds.entries()).filter(([, v]) => v > 0);
+      const sales = salesByDate.get(dt) ?? 0;
+      if (sales === 1 && total === 1 && distinct.length === 1) return distinct[0][0];
+      return null;
+    };
+
     // Which campaign bucket each sale piled into (shown in the Campaign column).
     const groupOf = (o: Order): string | null => {
       const d = estDate(o.placed_at ?? o.created_at);
@@ -142,8 +308,34 @@ export function ReportTab() {
       return g ? g.label : null;
     };
 
-    return buildSalesReport(filtered, resolve, adSpendCad, journey, campaignName, demo, groupOf);
-  }, [orders, byId, byEmail, journeys, campaigns, campaignGroups, demographics, adSpendCad, cutoff, campaignFilter]); // eslint-disable-line react-hooks/exhaustive-deps
+    return buildSalesReport(filtered, resolve, platform.totalSpend, journey, campaignName, demo, groupOf, creativeOf);
+  }, [orders, byId, byEmail, journeys, campaigns, campaignGroups, demographics, ads, platform, range, campaignFilter]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Meta age distribution for LILA Pro — the purchases Meta attributes by age
+  // bracket, across every demographic row whose campaign is NOT Mini and NOT
+  // Sharpei. All-time and independent of the sales date filter above: these are
+  // Meta's own attributed purchases, not Shopify sales, so they aren't scoped to
+  // the order window.
+  const proAges = useMemo(() => {
+    const isPro = (name: string | null) => {
+      const n = (name ?? '').toLowerCase();
+      return !/sharpei|waitlist/.test(n) && !/\bmini\b/.test(n);
+    };
+    const map = new Map<string, number>();
+    for (const d of demographics) {
+      if (d.age === 'all' || d.gender === 'all') continue;   // skip Meta's aggregate rows
+      if (!isPro(d.campaign_name)) continue;
+      map.set(d.age, (map.get(d.age) ?? 0) + (d.purchases ?? 0));
+    }
+    const ageRows = [...map.entries()]
+      .map(([age, count]) => ({ age, count }))
+      .filter(e => e.count > 0)
+      .sort((a, b) => AGE_ORDER.indexOf(a.age) - AGE_ORDER.indexOf(b.age));
+    const total = ageRows.reduce((s, e) => s + e.count, 0);
+    let wsum = 0, wn = 0;
+    for (const e of ageRows) { const mid = AGE_MID[e.age]; if (mid != null) { wsum += mid * e.count; wn += e.count; } }
+    return { rows: ageRows, total, avg: wn > 0 ? wsum / wn : null };
+  }, [demographics]);
 
   const pageCount = Math.max(1, Math.ceil(rows.length / pageSize));
   const safePage = Math.min(page, pageCount - 1);
@@ -168,9 +360,18 @@ export function ReportTab() {
             <option key={g.key} value={g.key}>{g.label}</option>
           ))}
         </select>
-        <select value={days} onChange={e => { setDays(Number(e.target.value)); setPage(0); }} style={selectStyle} disabled={campaignFilter !== 'all'}>
-          {RANGES.map(r => <option key={r.days} value={r.days}>{r.label}</option>)}
+        <select value={rangeKey} onChange={e => { setRangeKey(e.target.value); setPage(0); }} style={selectStyle} disabled={campaignFilter !== 'all'}>
+          {RANGES.map(r => <option key={r.key} value={r.key}>{r.label}</option>)}
         </select>
+        {rangeKey === 'custom' && campaignFilter === 'all' && (
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+            <input type="date" value={customStart} max={customEnd || undefined}
+              onChange={e => { setCustomStart(e.target.value); setPage(0); }} style={selectStyle} title="Start date" />
+            <span style={{ fontSize: 12, color: muted }}>→</span>
+            <input type="date" value={customEnd} min={customStart || undefined}
+              onChange={e => { setCustomEnd(e.target.value); setPage(0); }} style={selectStyle} title="End date" />
+          </span>
+        )}
         <select value={pageSize} onChange={e => { setPageSize(Number(e.target.value)); setPage(0); }} style={selectStyle} title="Rows per page">
           {[20, 40, 60, 80, 100].map(n => <option key={n} value={n}>{n} / page</option>)}
         </select>
@@ -187,22 +388,33 @@ export function ReportTab() {
         )}
       </div>
 
-      {/* KPI block */}
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, marginBottom: 16 }}>
+      {/* Combined KPI block — blended across Meta + Google ad spend. */}
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, marginBottom: 10 }}>
         <Kpi label="Total sales" value={String(kpis.sales)} />
         <Kpi label="Revenue" value={money(kpis.revenue)} />
-        <Kpi label="Ad spend (CAD)" value={money(kpis.adSpendCad)} />
-        <Kpi label="CAC" value={kpis.cac != null ? money(kpis.cac) : '—'} />
+        <Kpi label="Ad spend — total (CAD)" value={money(platform.totalSpend)} />
+        <Kpi label="Blended CAC" value={kpis.cac != null ? money(kpis.cac) : '—'} />
         <Kpi label="ROAS" value={kpis.roas != null ? `${kpis.roas.toFixed(2)}×` : '—'} />
         <Kpi label="ROI" value={kpis.roiPct != null ? `${kpis.roiPct}%` : '—'} />
         <Kpi label="Gross profit" value={money(kpis.grossProfit)} />
       </div>
 
+      {/* Per-platform split — each platform's own spend + reported conversions + CAC. */}
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, marginBottom: 16 }}>
+        <PlatformCard name="Meta ads" spend={platform.metaSpend} conversions={platform.metaConversions} cac={platform.metaCac} roas={platform.metaRoas}
+          note={platform.metaSpend === 0 ? 'no spend in this window' : undefined} />
+        <PlatformCard name="Google ads" spend={platform.googleSpend} conversions={platform.googleConversions} cac={platform.googleCac} roas={platform.googleRoas}
+          note={!platform.googleHasData ? 'no spend in this window' : undefined} />
+      </div>
+
       <div style={{ fontSize: 11, color: muted, marginBottom: 14 }}>
-        One row per buyer, mirroring the manual Sale tracker. <strong>Purchase time</strong> + visit history are auto-filled
-        from Klaviyo; <strong>Age / Gender</strong> are best-effort from Meta's purchase demographics — filled only when a
-        sale is an unambiguous match (that day + country had one sale and Meta shows one purchase in one age/gender segment),
-        otherwise UNKNOWN. Still manual: the exact <strong>ad creative</strong> (v21a…) in Notes. Run Sync All to populate.
+        One row per buyer, mirroring the manual Sale tracker. <strong>Ad spend, CAC, ROAS, ROI</strong> above are blended
+        across Meta + Google; the per-platform split (each platform's own reported conversions) sits right under them.
+        <strong>Purchase time</strong> + visit history are auto-filled
+        from Klaviyo. The exact <strong>ad creative</strong> (v28a…) in Notes comes from the order's own Shopify
+        <strong>utm_content</strong> when present (deterministic), otherwise a best-effort Meta clean-day match.
+        <strong>Age / Gender</strong> are best-effort from Meta's purchase demographics — filled only on an unambiguous
+        single-sale day. Operator-tracked creative still overrides. Run Sync All to populate.
       </div>
 
       {/* Per-buyer table — exact tracker columns */}
@@ -219,14 +431,24 @@ export function ReportTab() {
             <tbody>
               {pagedRows.map(r => (
                 <tr key={r.order_ref} style={{ borderTop: '1px solid var(--color-border)' }}>
-                  {reportCells(r).map((cell, i) => (
-                    <td key={i} style={{
-                      padding: '7px 10px',
-                      color: cell === UNKNOWN ? subtle : 'inherit',
-                      fontStyle: cell === UNKNOWN ? 'italic' : 'normal',
-                      fontWeight: i === 0 ? 600 : 400,
-                    }}>{cell}</td>
-                  ))}
+                  {reportCells(r).map((cell, i) => {
+                    const isRefund = i === REFUND_COL;
+                    const fullRefund = isRefund && cell === 'Yes';
+                    // An external reseller sale (Walmart / Best Buy / Collective)
+                    // stands out; our own website stays in the muted default.
+                    const isSource = i === SOURCE_COL;
+                    const external = isSource && cell !== SHOPIFY_WEBSITE;
+                    return (
+                      <td key={i} style={{
+                        padding: '7px 10px',
+                        color: fullRefund ? 'var(--color-crimson)'
+                          : external ? 'var(--color-info)'
+                          : (isRefund || cell === UNKNOWN) ? subtle : 'inherit',
+                        fontStyle: cell === UNKNOWN ? 'italic' : 'normal',
+                        fontWeight: fullRefund || external || i === 0 ? 600 : 400,
+                      }}>{fullRefund ? 'Full refund' : cell}</td>
+                    );
+                  })}
                 </tr>
               ))}
               {rows.length === 0 && <tr><td colSpan={REPORT_COLUMNS.length} style={{ padding: 12, color: subtle }}>No sales in this window.</td></tr>}
@@ -251,11 +473,47 @@ export function ReportTab() {
 
       {/* Breakdowns */}
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 20 }}>
+        <BreakdownTable title="By sale source" rows={kpis.bySource} />
         <BreakdownTable title="By channel" rows={kpis.byChannel} />
         <BreakdownTable title="By plan" rows={kpis.byPlan} />
         <BreakdownTable title="By province/state" rows={kpis.byProvince} />
         <BreakdownTable title="By discount code" rows={kpis.byDiscount} />
+        <AgeBreakdown title="By age — Meta · LILA Pro" rows={proAges.rows} total={proAges.total} avg={proAges.avg} />
       </div>
+    </div>
+  );
+}
+
+/** Meta's purchase demographics by age bracket for LILA Pro (every campaign that
+ *  isn't Mini or Sharpei). Mirrors the Demographics tab's "LILA Pro → By age" so
+ *  the numbers match; shows the count and share per bracket plus a weighted
+ *  average age. Purchases are Meta-attributed, not the Shopify sales above. */
+function AgeBreakdown({ title, rows, total, avg }: {
+  title: string;
+  rows: { age: string; count: number }[];
+  total: number;
+  avg: number | null;
+}) {
+  return (
+    <div style={{ minWidth: 220 }}>
+      <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 6 }}>{title}</div>
+      <table style={{ borderCollapse: 'collapse', fontSize: 12, width: '100%' }}>
+        <tbody>
+          {rows.map(r => (
+            <tr key={r.age} style={{ borderTop: '1px solid var(--color-border)' }}>
+              <td style={{ padding: '4px 0' }}>{r.age}</td>
+              <td style={{ textAlign: 'right', color: muted, fontVariantNumeric: 'tabular-nums' }}>{r.count.toLocaleString()}</td>
+              <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{total > 0 ? `${Math.round((r.count / total) * 100)}%` : '—'}</td>
+            </tr>
+          ))}
+          {rows.length === 0 && <tr><td style={{ color: subtle, padding: '4px 0' }}>No Meta purchase demographics yet</td></tr>}
+        </tbody>
+      </table>
+      {avg != null && rows.length > 0 && (
+        <div style={{ fontSize: 11, color: muted, marginTop: 4 }}>
+          Avg age ~{Math.round(avg)} · {total.toLocaleString()} Meta purchases
+        </div>
+      )}
     </div>
   );
 }
@@ -285,6 +543,32 @@ function Kpi({ label, value }: { label: string; value: string }) {
     <div style={{ border: '1px solid var(--color-border)', borderRadius: 6, padding: '8px 14px', minWidth: 110 }}>
       <div style={{ fontSize: 10, color: subtle, textTransform: 'uppercase', letterSpacing: 0.3 }}>{label}</div>
       <div style={{ fontSize: 18, fontWeight: 700, marginTop: 2 }}>{value}</div>
+    </div>
+  );
+}
+
+function PlatformCard({ name, spend, conversions, cac, roas, note }: {
+  name: string; spend: number; conversions: number; cac: number | null; roas: number | null; note?: string;
+}) {
+  return (
+    <div style={{ border: '1px solid var(--color-border)', borderRadius: 6, padding: '8px 14px', minWidth: 300 }}>
+      <div style={{ fontSize: 11, fontWeight: 700, marginBottom: 5 }}>{name}</div>
+      <div style={{ display: 'flex', gap: 18 }}>
+        <PlatformStat label="Spend (CAD)" value={money(spend)} />
+        <PlatformStat label="Conversions" value={String(conversions)} />
+        <PlatformStat label="CAC" value={cac != null ? money(cac) : '—'} />
+        <PlatformStat label="ROAS" value={roas != null ? `${roas.toFixed(2)}×` : '—'} />
+      </div>
+      {note && <div style={{ fontSize: 10, color: subtle, marginTop: 3 }}>{note}</div>}
+    </div>
+  );
+}
+
+function PlatformStat({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <div style={{ fontSize: 10, color: subtle, textTransform: 'uppercase', letterSpacing: 0.3 }}>{label}</div>
+      <div style={{ fontSize: 15, fontWeight: 700, marginTop: 1 }}>{value}</div>
     </div>
   );
 }

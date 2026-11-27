@@ -11,10 +11,10 @@ import {
   compileCancellationToRefund, dismissCancellationRefund, type OrderCancellation,
   cancelCancellationRequest, cancelRefundRequest, canCancelRefundRequest,
   cancelReturnRequest, canCancelReturnRequest,
-  setReturnDisposition, updateReturnStatus,
+  setReturnDisposition, updateReturnStatus, returnStatusAllowsRefund,
   useCaseAttachments, uploadCaseAttachment, deleteCaseAttachment, returnAttachmentSignedUrl,
   RETURN_ATTACH_INPUT_ACCEPT, RETURN_ATTACH_CATEGORIES, RETURN_ATTACH_ALLOWED_MIME,
-  RETURN_CATEGORIES, RETURN_CATEGORY_META, manualRefundReason,
+  RETURN_CATEGORIES, RETURN_CATEGORY_META, manualRefundReason, REIMBURSEMENT_REASON_PREFIX,
   type ReturnAttachment, type ReturnAttachmentCategory,
   useCaseNotes, addCaseNote, updateCaseNote, deleteCaseNote, type CaseNote,
   REFUND_STATUS_META, REFUND_METHODS, REFUND_METHOD_META,
@@ -2628,6 +2628,12 @@ function CreateManualRefundModal({
   const [listOpen, setListOpen] = useState(false);
   const [category, setCategory] = useState<ReturnCategory | ''>('');
   const [reasonDetail, setReasonDetail] = useState('');
+  // Reimbursement: paying the customer back for something without unwinding a
+  // sale — none of their orders are cancelled, and the amount is entered here
+  // instead of opening at the full invoice.
+  const [reimbursement, setReimbursement] = useState(false);
+  const [amountStr, setAmountStr] = useState('');
+  const [currency, setCurrency] = useState<RefundCurrency>('CAD');
   const [files, setFiles] = useState<File[]>([]);
   const [notes, setNotes] = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -2676,7 +2682,9 @@ function CreateManualRefundModal({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const canSubmit = !!payee && !!category && !submitting;
+  const reimburseAmount = Number(amountStr);
+  const amountOk = !reimbursement || (amountStr.trim() !== '' && Number.isFinite(reimburseAmount) && reimburseAmount > 0);
+  const canSubmit = !!payee && !!category && amountOk && !submitting;
 
   const submit = async () => {
     if (!payee || !category) return;
@@ -2686,8 +2694,11 @@ function CreateManualRefundModal({
       setStep('Creating the card…');
       // Opens at what they paid on their sales invoice (CAD); Finance confirms
       // the figure and sets the method at Finance Review.
-      const opening = await defaultRefundAmountFromInvoice(payee.email, null, null);
-      const reason = manualRefundReason(category, reasonDetail);
+      const opening = reimbursement
+        ? { amount: reimburseAmount, currency }
+        : await defaultRefundAmountFromInvoice(payee.email, null, null);
+      const baseReason = manualRefundReason(category, reasonDetail);
+      const reason = reimbursement ? `${REIMBURSEMENT_REASON_PREFIX}: ${baseReason}` : baseReason;
       refundId = await submitRefundRequest({
         customer_name: payee.full_name,
         customer_email: payee.email ?? undefined,
@@ -2695,7 +2706,7 @@ function CreateManualRefundModal({
         currency: opening.currency,
         reason,
         notes: purchaser ? `Opened from directory entry "${picked?.full_name}" (user); refund books to the purchaser.` : undefined,
-      }, { onAutoCancel });
+      }, { onAutoCancel, reimbursement });
 
       if (files.length) {
         setStep(`Uploading ${files.length} file${files.length > 1 ? 's' : ''}…`);
@@ -2793,6 +2804,33 @@ function CreateManualRefundModal({
           )}
 
           <div className={styles.modalRow}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
+              <input type="checkbox" checked={reimbursement} onChange={e => setReimbursement(e.target.checked)} />
+              Reimbursement
+            </label>
+            <div style={{ fontSize: 12, color: '#718096', marginTop: 2 }}>
+              {reimbursement
+                ? 'We are paying the customer back for something. None of their orders will be cancelled or pulled from the fulfillment queue.'
+                : 'Off: every order this customer still has in flight is cancelled when the card is created.'}
+            </div>
+          </div>
+          {reimbursement && (
+            <div className={styles.modalRow}>
+              <label>Reimbursement amount <span style={{ color: '#c53030' }}>*</span></label>
+              <div style={{ display: 'flex', gap: 6 }}>
+                <input type="number" min="0" step="0.01" value={amountStr}
+                       onChange={e => setAmountStr(e.target.value)}
+                       className={styles.modalInput} placeholder="0.00" style={{ flex: 1 }} />
+                <select value={currency} onChange={e => setCurrency(e.target.value as RefundCurrency)}
+                        className={styles.modalInput} style={{ width: 90 }}>
+                  <option value="CAD">CAD</option>
+                  <option value="USD">USD</option>
+                </select>
+              </div>
+            </div>
+          )}
+
+          <div className={styles.modalRow}>
             <label>Reason for refund <span style={{ color: '#c53030' }}>*</span></label>
             <select value={category} onChange={e => setCategory(e.target.value as ReturnCategory)}
                     className={styles.modalInput}>
@@ -2843,7 +2881,9 @@ function CreateManualRefundModal({
           </div>
 
           <div style={{ fontSize: 12, color: '#718096', margin: '2px 0 0' }}>
-            Opens in Completeness at what the customer paid on their sales invoice. Finance confirms
+            {reimbursement
+              ? 'Opens in Completeness at the amount above.'
+              : 'Opens in Completeness at what the customer paid on their sales invoice.'} Finance confirms
             the amount and sets the payment method at Finance Review.
           </div>
         </div>
@@ -2851,7 +2891,7 @@ function CreateManualRefundModal({
           {step && <span style={{ fontSize: 12, color: '#718096', marginRight: 'auto' }}>{step}</span>}
           <button onClick={onClose} className={styles.modalSecondary}>Cancel</button>
           <button onClick={() => void submit()} disabled={!canSubmit} className={styles.modalPrimary}
-                  title={!picked ? 'Pick a customer from the directory' : !category ? 'Choose a reason for the refund' : ''}>
+                  title={!picked ? 'Pick a customer from the directory' : !category ? 'Choose a reason for the refund' : !amountOk ? 'Enter the reimbursement amount' : ''}>
             {submitting ? 'Creating…' : 'Create refund'}
           </button>
         </div>
@@ -2894,14 +2934,19 @@ function FinanceApproveModal({
   const [busy, setBusy] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
 
-  const FINANCE_OK_STATUSES = ['received', 'inspected', 'refunded', 'closed'];
   const DEFECTIVE_CATEGORIES: ReturnCategory[] = ['product_defect', 'shipping_damage'];
   const isDefectiveDiscard =
     linkedReturn?.status === 'discarded' && (
       (linkedReturn.return_category != null && DEFECTIVE_CATEGORIES.includes(linkedReturn.return_category)) ||
       linkedReturn.return_reasons.some(r => /defect|crack|malfunction|hardware|broken|damag/i.test(r))
     );
-  const returnNotReceived = linkedReturn != null && !FINANCE_OK_STATUSES.includes(linkedReturn.status) && !isDefectiveDiscard;
+  // Gate on the same rule financeApprove() enforces (any discarded return is
+  // refundable). isDefectiveDiscard only decides the fee defaults below — it
+  // used to also block approval, which stranded non-defect discards in
+  // Finance Review after the manager had already approved them (Raymond
+  // Keetch #1216, software_issue, 2026-11-17).
+  const returnNotReceived = linkedReturn != null && !returnStatusAllowsRefund(linkedReturn.status);
+  const nonDefectDiscard = linkedReturn?.status === 'discarded' && !isDefectiveDiscard;
 
   const amount = Number(amountStr);
   const amountChanged = !Number.isNaN(amount) && Number(amount.toFixed(2)) !== Number(original.toFixed(2));
@@ -2970,6 +3015,12 @@ function FinanceApproveModal({
           <div className={styles.financeModalWarn}>
             ⚠ Linked return is in "<strong>{linkedReturn!.status}</strong>" status — refund can only
             be processed after the unit is received, or marked as discarded due to a confirmed defect or damage.
+          </div>
+        )}
+        {nonDefectDiscard && (
+          <div className={styles.modalHint} style={{ marginBottom: 12 }}>
+            ✓ Ready to approve — the customer discarded the unit. It isn't recorded as a defect, so the
+            $50 restocking fee is pre-filled below; set it to 0 if you're waiving it. Approve button is at the bottom.
           </div>
         )}
         {localError && <div className={styles.financeModalError}>{localError}</div>}

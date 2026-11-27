@@ -1,9 +1,9 @@
 import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { supabase } from '../../../lib/supabase';
-import { useFulfillmentQueue, type FulfillmentQueueRow } from '../../../lib/fulfillment';
+import { useFulfillmentQueue, type FulfillmentQueueRow, type SendFulfillmentEmailResult } from '../../../lib/fulfillment';
 import type { OrderStatus, Order as FullOrder } from '../../../lib/orders';
-import { QueueSidebar } from './QueueSidebar';
+import { QueueSidebar, priorityTag } from './QueueSidebar';
 import { QueueHeader } from './QueueHeader';
 import { StepAssign } from './StepAssign';
 import { StepPartsOnly } from './StepPartsOnly';
@@ -47,6 +47,9 @@ type Order = {
   // "Shipment Received" button; it is the whole basis of the Received rail.
   // select('*') already returns it.
   delivered_at: string | null;
+  // Received with no date on record (pre-October 2026 backfill). Lands in the
+  // Received rail's "Date unknown" bucket rather than under an invented month.
+  received_undated?: boolean;
   // Replacements only: what is actually in the box, and the case it came from.
   // select('*') already returns these; they were simply never read here, which
   // is why the card called a $24 lid a LILA Pro.
@@ -57,6 +60,11 @@ type Order = {
   // and it is what keeps a reship out of the already-shipped rail even though
   // its first machine is stamped and shipped. select('*') returns it.
   reconcile_outcome: string | null;
+  // Walmart / Best Buy marker and Sales' priority pin (select('*') returns both).
+  sales_channel?: string | null;
+  is_priority?: boolean | null;
+  // When Sales confirmed it — starts the ship clock (lib/shipDeadlines.ts).
+  dispositioned_at?: string | null;
 };
 
 export default function Queue() {
@@ -83,6 +91,9 @@ export default function Queue() {
   // The row disappears via realtime, so without this the detail pane would
   // silently fall back to "Select a queued order" with no confirmation.
   const [notice, setNotice] = useState<string | null>(null);
+  // What the shipping send just reported (email + Quo text), shown on the
+  // Pickup step it lands on. The email step unmounts when the row advances.
+  const [sendNote, setSendNote] = useState<{ rowId: string; result: SendFulfillmentEmailResult } | null>(null);
 
   const orderLookup = useMemo(() => {
     const m = new Map<string, Order>();
@@ -112,11 +123,15 @@ export default function Queue() {
       const refB = orderLookup.get(b.order_id)?.order_ref ?? '';
       return refA.localeCompare(refB);
     };
-    // Priority rows (sales-flagged expedites) float to the top of Ready.
+    // Priority rows float to the top of Ready: queue-starred expedites and
+    // Sales priority orders (Walmart / Best Buy / hand-pinned) alike.
+    const isHot = (r: FulfillmentQueueRow) =>
+      r.priority || priorityTag(orderLookup.get(r.order_id)) !== null;
     const readySorted = [...ready]
       .filter(r => !shippedMarks.has(r.id))
       .sort((a, b) => {
-        if (a.priority !== b.priority) return a.priority ? -1 : 1;
+        const ha = isHot(a), hb = isHot(b);
+        if (ha !== hb) return ha ? -1 : 1;
         return byRef(a, b);
       });
     // Moved, not hidden: the row still has an order behind it that someone has
@@ -134,13 +149,15 @@ export default function Queue() {
     // badge on Shipped: the carrier's "delivered" scan is not what fills it —
     // an operator confirming the arrival is.
     const everythingShipped = [...fulfilled, ...alreadyShipped];
-    const receivedOf = (r: FulfillmentQueueRow) =>
-      orderLookup.get(r.order_id)?.delivered_at ?? null;
+    const receivedOf = (r: FulfillmentQueueRow) => {
+      const o = orderLookup.get(r.order_id);
+      return !!(o?.delivered_at || o?.received_undated);
+    };
     return {
       readyRows: stillOurs,
       pickupRows: pickup,
       shippedRows: everythingShipped.filter(r => !receivedOf(r)),
-      receivedRows: everythingShipped.filter(r => !!receivedOf(r)),
+      receivedRows: everythingShipped.filter(r => receivedOf(r)),
     };
   }, [ready, fulfilled, orderLookup, shippedMarks, goorooshipSends, isEzTransRow]);
 
@@ -288,7 +305,7 @@ export default function Queue() {
                       so they are left alone. */}
                   {selected.step === 1 && (partsOnly
                     ? <StepPartsOnly row={selected} order={selectedOrder} onShipped={() => { void refresh(); }} />
-                    : <StepAssign row={selected} order={selectedOrder} />)}
+                    : <StepAssign key={selected.id} row={selected} order={selectedOrder} />)}
                   {selected.step === 2 && (partsOnly
                     ? <StepPartsOnly row={selected} order={selectedOrder} onShipped={() => { void refresh(); }} />
                     : <StepTest row={selected} />)}
@@ -307,8 +324,24 @@ export default function Queue() {
                       onBatchChanged={() => { void refresh(); void refreshSends(); }}
                     />
                   )}
-                  {selected.step === 4 && <StepDock row={selected} />}
-                  {selected.step === 5 && <StepEmail row={selected} order={selectedOrder} onSent={() => { void refresh(); }} />}
+                  {/* Since 2026-11-05: 3 Label → 4 Email → 5 Pickup → 6.
+                      The shipping email is the window straight after "Pickup
+                      scheduled", while the card is still under Ready to ship.
+                      A step-5 row with no email is one docked under the old
+                      order (dock → email) — it still owes the email. */}
+                  {(selected.step === 4 || (selected.step === 5 && !selected.email_sent_at)) && (
+                    <StepEmail
+                      row={selected}
+                      order={selectedOrder}
+                      onSent={result => { setSendNote({ rowId: selected.id, result }); void refresh(); }}
+                    />
+                  )}
+                  {selected.step === 5 && !!selected.email_sent_at && (
+                    <>
+                      <SendNote note={sendNote?.rowId === selected.id ? sendNote.result : null} row={selected} />
+                      <StepDock row={selected} onConfirmed={() => { void refresh(); }} />
+                    </>
+                  )}
                   {selected.step === 6 && <StepFulfilled row={selected} order={selectedOrder} />}
                 </>
               )}
@@ -324,6 +357,31 @@ export default function Queue() {
         orders={batchOrders}
         onSent={() => { void refresh(); void refreshSends(); }}
       />
+    </div>
+  );
+}
+
+/** The shipping send's outcome, above the Pickup step: the email went, the
+ *  Quo text did or did not, and when the onboarding email is due. */
+function SendNote({ note, row }: { note: SendFulfillmentEmailResult | null; row: FulfillmentQueueRow }) {
+  const due = note?.onboarding_email_due_at ?? row.onboarding_email_due_at ?? null;
+  const sentOnboarding = row.onboarding_email_sent_at ?? null;
+  return (
+    <div style={{ fontSize: 11, marginBottom: 10, lineHeight: 1.6 }}>
+      <div style={{ color: 'var(--color-success)' }}>
+        ✓ Shipping email sent{row.email_sent_at ? ` ${new Date(row.email_sent_at).toLocaleString()}` : ''}.
+      </div>
+      {note?.sms && (note.sms.ok
+        ? <div style={{ color: 'var(--color-success)' }}>✓ Quo text sent to {note.sms.to}.</div>
+        : <div style={{ color: 'var(--color-error)' }}>✗ Quo text not sent: {note.sms.error}</div>)}
+      {sentOnboarding
+        ? <div style={{ color: 'var(--color-success)' }}>✓ Onboarding instructions sent {new Date(sentOnboarding).toLocaleString()}.</div>
+        : due
+          ? <div style={{ color: 'var(--color-ink-muted)' }}>Onboarding instructions email + text go out automatically {new Date(due).toLocaleString()}.</div>
+          : null}
+      {row.onboarding_email_error && (
+        <div style={{ color: 'var(--color-warning)' }}>Onboarding send: {row.onboarding_email_error}</div>
+      )}
     </div>
   );
 }

@@ -28,7 +28,8 @@ type SendResult = {
   unsigned_worksheets: string[];
 };
 
-const { sendMock, logActionMock } = vi.hoisted(() => ({
+const { sendMock, logActionMock, unconfirmMock } = vi.hoisted(() => ({
+  unconfirmMock: vi.fn((_id: string) => Promise.resolve()),
   sendMock: vi.fn((queueIds: string[]): Promise<SendResult> => {
     void queueIds;
     return Promise.resolve({
@@ -52,7 +53,7 @@ const { sendMock, logActionMock } = vi.hoisted(() => ({
 
 vi.mock('../../../lib/eztransBatch', async () => {
   const actual = await vi.importActual<typeof import('../../../lib/eztransBatch')>('../../../lib/eztransBatch');
-  return { ...actual, sendEzTransDailyBatch: sendMock };
+  return { ...actual, sendEzTransDailyBatch: sendMock, unconfirmEzTransOrder: unconfirmMock };
 });
 
 vi.mock('../../../lib/activityLog', async () => {
@@ -83,7 +84,7 @@ function row(over: Partial<EzTransBatchQueueRow> & { id: string }): EzTransBatch
   };
 }
 
-const sendButton = () => screen.getByRole('button', { name: /email today's fulfilled orders to goorooship/i });
+const sendButton = () => screen.getByRole('button', { name: /send to ez trans/i });
 
 describe('GoorooshipDailyBatch', () => {
   beforeEach(() => { sendMock.mockClear(); logActionMock.mockClear(); });
@@ -91,7 +92,7 @@ describe('GoorooshipDailyBatch', () => {
   it('has nothing to send on a day nobody confirmed anything', () => {
     render(<GoorooshipDailyBatch rows={[]} orders={ORDERS} />);
     expect(sendButton()).toBeDisabled();
-    expect(screen.getByText(/Nothing is confirmed for EZ Trans today/i)).toBeInTheDocument();
+    expect(screen.getByText(/No orders yet/i)).toBeInTheDocument();
   });
 
   it('lists what is waiting and names the documents each order brings', () => {
@@ -171,5 +172,16 @@ describe('GoorooshipDailyBatch', () => {
     fireEvent.click(sendButton());
     expect(await screen.findByText(/Resend refused/)).toBeInTheDocument();
     expect(logActionMock).not.toHaveBeenCalled();
+  });
+
+  it('takes one order back out of today\'s email without touching the booking', async () => {
+    const onSent = vi.fn();
+    render(
+      <GoorooshipDailyBatch rows={[row({ id: 'q-a', eztrans_confirmed_at: TODAY })]} orders={ORDERS} onSent={onSent} />,
+    );
+    fireEvent.click(screen.getByTestId('batch-remove'));
+    await waitFor(() => expect(unconfirmMock).toHaveBeenCalledWith('q-a'));
+    await waitFor(() => expect(onSent).toHaveBeenCalled());
+    expect(logActionMock).toHaveBeenCalled();
   });
 });

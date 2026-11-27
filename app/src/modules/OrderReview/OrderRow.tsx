@@ -1,7 +1,7 @@
 import type { CSSProperties } from 'react';
 import type { Order } from '../../lib/orders';
 import { DWELLING_LABEL, needsFitConfirmation } from '../../lib/addressClassify';
-import { orderUrgency, AREA_TYPE_TAG } from '../../lib/orders';
+import { orderUrgency, AREA_TYPE_TAG, resellerLabel } from '../../lib/orders';
 import { refundFlagLabel, refundFlagTitle, type RefundFlag } from '../../lib/refundedOrders';
 import { useQuotes } from '../../lib/freight';
 import { canConfirm } from './detail/ReadinessChecklist';
@@ -61,6 +61,16 @@ export function OrderRow({
   // outright: the building has units and the order names none.
   const unitMissing = order.address_unit_status === 'missing';
   const isCancelled = order.status === 'cancelled';
+  // Which reseller marketplace this sale came through (Walmart / Best Buy), or
+  // null for our own Shopify storefront. Null carries no tag.
+  const reseller = resellerLabel(order);
+  // Held and Flagged share one rail tab now (Needs Attention), so the row has to
+  // carry which of the two it is — otherwise the merged list is unreadable.
+  const needsAttention = !isCancelled && (order.status === 'held' || order.status === 'flagged');
+  // A hand-pinned priority order. Reseller orders are priority too, but they
+  // already wear their Walmart / Best Buy tag, so the star is reserved for the
+  // ones with no other reason showing on the row.
+  const handPinned = order.is_priority === true && !reseller;
   // A dot rather than a chip: it says "this one isn't confirmable yet" without
   // spending the width the SLA needs. Meaningless on terminal/decided rows.
   const showBlockDot = !isCancelled && order.status !== 'approved' && !canConfirm(order);
@@ -93,6 +103,10 @@ export function OrderRow({
     saleDate ? `ordered ${saleDate}` : null,
     isCancelled ? 'cancelled' : urgency.label || null,
     showBlockDot ? 'not yet confirmable' : null,
+    order.status === 'held' ? 'on hold' : null,
+    order.status === 'flagged' ? 'flagged' : null,
+    handPinned ? 'priority' : null,
+    reseller ? `${reseller} order` : null,
     refundFlag ? refundFlagLabel(refundFlag).toLowerCase() : null,
     commConcern ? 'customer communication unclear' : null,
   ].filter(Boolean).join(', ');
@@ -132,6 +146,26 @@ export function OrderRow({
       </span>
 
       <span className={styles.rowTags}>
+        {handPinned && (
+          <span className={`${styles.tag} ${styles.tagPriority}`} title="Priority — pinned by an operator to be worked first">
+            ★ Priority
+          </span>
+        )}
+        {needsAttention && (
+          <span
+            className={`${styles.tag} ${order.status === 'flagged' ? styles.tagFlaggedStatus : styles.tagHeldStatus}`}
+            title={order.status === 'flagged'
+              ? 'Flagged — a problem was raised on this order; see the log'
+              : 'On hold — released from the detail pane'}
+          >
+            {order.status === 'flagged' ? 'Flagged' : 'Held'}
+          </span>
+        )}
+        {reseller && (
+          <span className={`${styles.tag} ${styles.tagReseller}`} title={`Sold through ${reseller} (reseller marketplace), synced from Shopify`}>
+            {reseller}
+          </span>
+        )}
         {refundFlag && (
           <span
             className={`${styles.tag} ${refundFlag.level === 'order' ? styles.tagRefunded : styles.tagRefundedCustomer}`}

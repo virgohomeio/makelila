@@ -59,7 +59,7 @@ import { StepEmail } from '../queue/StepEmail';
 import type { FulfillmentQueueRow } from '../../../lib/fulfillment';
 
 const rowBase: FulfillmentQueueRow = {
-  id: 'q-e', order_id: 'o-e', step: 5, assigned_serial: 'LL01-00000000050', assigned_serials: ['LL01-00000000050'],
+  id: 'q-e', order_id: 'o-e', step: 4, assigned_serial: 'LL01-00000000050', assigned_serials: ['LL01-00000000050'],
   test_report_url: null, test_confirmed_at: null, test_confirmed_by: null,
   carrier: 'UPS', tracking_num: '1ZABC',
   label_pdf_path: null, label_confirmed_at: null, label_confirmed_by: null,
@@ -109,13 +109,13 @@ describe('StepEmail', () => {
     expect(screen.getByRole('button', { name: /send email/i })).toBeDisabled();
   });
 
-  it('Preview renders the template with BOTH the weekday and off-hours Calendly links', () => {
+  it('Preview carries shipping info and the signature requirement only', () => {
     render(<StepEmail row={rowBase} order={orderCA} />);
     const body = screen.getByRole('textbox', { name: /Body/ }) as HTMLTextAreaElement;
-    expect(body.value).toContain('https://calendly.com/lila-ed/intro-call');
-    expect(body.value).toContain('https://calendly.com/lila-ed/lila-onboarding-with-danica-patrik');
-    // The old bare-profile link is gone.
-    expect(body.value).not.toContain('https://calendly.com/lila-ed.');
+    expect(body.value).toMatch(/signature is required/i);
+    // Onboarding instructions moved to the automatic next-day email.
+    expect(body.value).not.toContain('calendly.com');
+    expect(body.value).not.toContain('lilalovely.io');
     // Variables are resolved, not left as placeholders.
     expect(body.value).toContain('Hi Bob,');
     expect(body.value).toContain('Tracking Number: 1ZABC');
@@ -124,7 +124,7 @@ describe('StepEmail', () => {
   it('Subject renders from the template', () => {
     render(<StepEmail row={rowBase} order={orderCA} />);
     expect((screen.getByRole('textbox', { name: /Subject/ }) as HTMLInputElement).value)
-      .toBe('Your LILA has officially shipped! 🎉 (#1002)');
+      .toBe('Important Information For Your LILA Shipment');
   });
 
   it('Empty starter block is stripped, not printed as {{starter_block}} (CA order)', () => {
@@ -149,7 +149,27 @@ describe('StepEmail', () => {
     await waitFor(() => expect(sendEmailMock).toHaveBeenCalled());
     const [, content] = sendEmailMock.mock.calls[0] as unknown as [string, { subject: string; body: string; edited: boolean }];
     expect(content.edited).toBe(false);
-    expect(content.body).toContain('https://calendly.com/lila-ed/intro-call');
+    expect(content.body).toContain('Tracking Number: 1ZABC');
+  });
+
+  it('Sends the condensed Quo text with the email by default', async () => {
+    render(<StepEmail row={rowBase} order={orderCA} />);
+    fireEvent.change(screen.getByPlaceholderText('42.75'), { target: { value: '42.75' } });
+    fireEvent.click(screen.getByRole('button', { name: /send email \+ text/i }));
+    await waitFor(() => expect(sendEmailMock).toHaveBeenCalled());
+    const [, content] = sendEmailMock.mock.calls[0] as unknown as [string, { sms?: string }];
+    expect(content.sms).toContain('1ZABC');
+    expect(content.sms).toMatch(/signature is required/i);
+  });
+
+  it('Sends no text when the Quo box is unticked', async () => {
+    render(<StepEmail row={rowBase} order={orderCA} />);
+    fireEvent.click(screen.getByRole('checkbox', { name: /Quo text/i }));
+    fireEvent.change(screen.getByPlaceholderText('42.75'), { target: { value: '42.75' } });
+    fireEvent.click(screen.getByRole('button', { name: /^✉ send email$/i }));
+    await waitFor(() => expect(sendEmailMock).toHaveBeenCalled());
+    const [, content] = sendEmailMock.mock.calls[0] as unknown as [string, { sms?: string }];
+    expect(content.sms).toBeUndefined();
   });
 
   it('An edited body is what gets sent', async () => {
@@ -158,32 +178,32 @@ describe('StepEmail', () => {
     fireEvent.change(screen.getByPlaceholderText('42.75'), { target: { value: '42.75' } });
     fireEvent.click(screen.getByRole('button', { name: /send email/i }));
     await waitFor(() => expect(sendEmailMock).toHaveBeenCalledWith('q-e', {
-      subject: 'Your LILA has officially shipped! 🎉 (#1002)',
+      subject: 'Important Information For Your LILA Shipment',
       body: 'Hand-written note.',
       edited: true,
+      sms: expect.stringContaining('1ZABC'),
     }));
   });
 
   // The regression this whole fallback exists for: the row live in production
   // declares {{calendly_url}}, so rendering it put a literal placeholder in
   // the draft and neither booking link appeared.
-  it('A stale stored row is ignored — both links show, no raw placeholder', () => {
+  it('A stale stored row is ignored — built-in wording, no raw placeholder', () => {
     tplState.current = { ...staleRow };
     render(<StepEmail row={rowBase} order={orderCA} />);
     const body = (screen.getByRole('textbox', { name: /Body/ }) as HTMLTextAreaElement).value;
-    expect(body).toContain('https://calendly.com/lila-ed/intro-call');
-    expect(body).toContain('https://calendly.com/lila-ed/lila-onboarding-with-danica-patrik');
+    expect(body).toContain('Tracking Number: 1ZABC');
     expect(body).not.toContain('{{calendly_url}}');
     expect(body).not.toContain('{{');
     expect(screen.getByText(/Showing the built-in wording/)).toBeInTheDocument();
   });
 
-  it('Both links show when no template row exists at all', () => {
+  it('The built-in wording shows when no template row exists at all', () => {
     tplState.current = null;
     render(<StepEmail row={rowBase} order={orderCA} />);
     const body = (screen.getByRole('textbox', { name: /Body/ }) as HTMLTextAreaElement).value;
-    expect(body).toContain('https://calendly.com/lila-ed/intro-call');
-    expect(body).toContain('https://calendly.com/lila-ed/lila-onboarding-with-danica-patrik');
+    expect(body).toContain('Tracking Number: 1ZABC');
+    expect(body).toMatch(/signature is required/i);
     expect(screen.getByRole('button', { name: /send email/i })).toBeInTheDocument();
   });
 
@@ -192,7 +212,7 @@ describe('StepEmail', () => {
     render(<StepEmail row={rowBase} order={orderCA} />);
     const body = (screen.getByRole('textbox', { name: /Body/ }) as HTMLTextAreaElement).value;
     expect(body).toContain('Operator wording.');
-    expect(body).not.toContain('https://calendly.com/lila-ed/intro-call');
+    expect(body).not.toMatch(/signature is required/i);
     expect(screen.queryByText(/Showing the built-in wording/)).not.toBeInTheDocument();
   });
 
@@ -253,7 +273,7 @@ describe('StepEmail', () => {
     render(<StepEmail row={rowBase} order={orderCA} />);
     fireEvent.change(screen.getByPlaceholderText('42.75'), { target: { value: '42.75' } });
     fireEvent.click(screen.getByRole('button', { name: /send email/i }));
-    await waitFor(() => expect(screen.getByText(/this order is now fulfilled/)).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText(/Email sent\./)).toBeInTheDocument());
   });
 
   it('Asks the board to re-read the queue after a send', async () => {
@@ -280,7 +300,7 @@ describe('StepEmail', () => {
     render(<StepEmail row={rowBase} order={orderCA} />);
     fireEvent.change(screen.getByPlaceholderText('42.75'), { target: { value: '42.75' } });
     fireEvent.click(screen.getByRole('button', { name: /send email/i }));
-    await waitFor(() => expect(screen.getByText(/this order is now fulfilled/)).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText(/Email sent\./)).toBeInTheDocument());
     expect(screen.getByRole('button', { name: /email sent/i })).toBeDisabled();
     expect(sendEmailMock).toHaveBeenCalledTimes(1);
   });
@@ -306,7 +326,7 @@ describe('StepEmail', () => {
     await waitFor(() => expect(sendEmailMock).toHaveBeenCalled());
     const [, content] = sendEmailMock.mock.calls[0] as unknown as [string, { subject: string; body: string; edited: boolean }];
     expect(content.edited).toBe(false);
-    expect(content.body).toContain('https://calendly.com/lila-ed/intro-call');
+    expect(content.body).toContain('Tracking Number: 1ZABC');
   });
 
   it('Does NOT auto-send (auto-send disabled; shipping cost required first)', async () => {

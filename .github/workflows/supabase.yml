@@ -47,9 +47,13 @@ jobs:
             name=$(basename "$fn")
             [ "$name" = "_shared" ] && continue
             echo "::group::Deploying $name"
+            # --yes: newer Supabase CLI prompts to confirm a deploy and aborts
+            # in CI ("stdout is not a terminal") without it. Non-interactive runs
+            # must pass it or the whole loop dies on the first function.
             supabase functions deploy "$name" \
               --project-ref "$SUPABASE_PROJECT_REF" \
-              --no-verify-jwt
+              --no-verify-jwt \
+              --yes
             echo "::endgroup::"
           done
 

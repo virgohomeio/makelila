@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { assignUnits, orderUnitTarget, type FulfillmentQueueRow } from '../../../lib/fulfillment';
 import { useUnits, type Unit } from '../../../lib/stock';
 import { StepBlockers } from './StepBlockers';
@@ -31,9 +31,15 @@ export function StepAssign({
   order,
 }: {
   row: FulfillmentQueueRow;
-  order: { line_items?: unknown };
+  order: { line_items?: unknown; order_ref?: string };
 }) {
   const { units, loading } = useUnits();
+  // A unit already reserved for this very order — a replacement reserves its
+  // machine when it is raised — is no longer 'ready', but it is the one this
+  // order is meant to ship. List it, and pick it up front.
+  const ownRef = order.order_ref ?? null;
+  const isOwnReservation = (u: Unit) =>
+    !!ownRef && u.status === 'reserved' && u.customer_order_ref === ownRef;
   // Stock is the source of truth: only units the team has marked 'ready' under
   // the Stock tab are available to ship.
   // Backlog #57 — temporary backfill mode also surfaces 'shipped' units so
@@ -41,10 +47,26 @@ export function StepAssign({
   // in makelila without losing the shipped status. Visible warning when on.
   const [backfillMode, setBackfillMode] = useState(false);
   const candidates = useMemo(
-    () => units.filter(u => u.status === 'ready' || (backfillMode && u.status === 'shipped')),
-    [units, backfillMode],
+    () => {
+      const list = units.filter(u =>
+        u.status === 'ready' || isOwnReservation(u) || (backfillMode && u.status === 'shipped'));
+      // Own reservations first, so the machine this order was raised with is
+      // the first tile, not one of 180.
+      return [...list.filter(isOwnReservation), ...list.filter(u => !isOwnReservation(u))];
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [units, backfillMode, ownRef],
   );
   const [picked, setPicked] = useState<string[]>([]);
+  // Pre-pick the reserved-for-this-order units once stock has loaded.
+  const [prePicked, setPrePicked] = useState(false);
+  useEffect(() => {
+    if (loading || prePicked) return;
+    setPrePicked(true);
+    const own = units.filter(isOwnReservation).map(u => u.serial);
+    if (own.length > 0) setPicked(own);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loading, prePicked, units]);
   const [search, setSearch] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -221,7 +243,7 @@ export function StepAssign({
                 <div className={styles.slotPickQcBadge}>⚠ QC</div>
               )}
               <div className={styles.slotPickBottom}>
-                {u.location ?? 'no location'}
+                {isOwnReservation(u) ? 'Reserved for this order' : (u.location ?? 'no location')}
               </div>
             </div>
           );

@@ -7,13 +7,14 @@ import type { Order } from './orders';
 import type { Unit } from './stock';
 import type { CustomerLifecycle, ServiceTicket } from './service';
 import type { CustomerEvent } from './customerEvents';
+import { ONBOARDING_STEPS, type LovelyUser } from './lovely';
 
 // Customers > Timelines — when each thing happened to each customer, and how
 // long each gap took.
 //
 // The Journey tab answers "which stage is this customer in". This answers "on
 // what date", which is a different question and the reason Journey carries no
-// dates. Six milestones, in order, plus the diagnosis-call log.
+// dates. Seven milestones, in order, plus the diagnosis-call log.
 //
 // Every milestone is DERIVED from data the app already has, and every milestone
 // can be OVERRIDDEN by an operator typing a date. The override wins and never
@@ -24,15 +25,15 @@ import type { CustomerEvent } from './customerEvents';
 // ── Milestones ──────────────────────────────────────────────────────────────
 
 export type MilestoneKey =
-  | 'ordered' | 'shipped' | 'received' | 'onboarding_call' | 'onboarded' | 'first_use';
+  | 'ordered' | 'shipped' | 'received' | 'app_onboarded' | 'onboarding_call' | 'onboarded' | 'first_use';
 
 /** Where a manual date for this milestone is stored.
  *
- *  Three of the six already have an operator-writable column on `customers`
+ *  Three of the seven already have an operator-writable column on `customers`
  *  that the rest of the app reads — `onboard_date` in particular is the anchor
  *  the FU1/FU2 follow-up calendar counts from. Those write to the column, so a
  *  date typed here moves the number every other screen shows. The remaining
- *  three have nowhere to live and use customer_timeline_milestones.
+ *  four have nowhere to live and use customer_timeline_milestones.
  *
  *  Callers never branch on this: setMilestoneOverride dispatches on it. */
 type OverrideStore =
@@ -67,6 +68,11 @@ export const MILESTONES: readonly MilestoneDef[] = [
     store: { kind: 'customer_column', column: 'received_on' },
   },
   {
+    key: 'app_onboarded', short: 'Lovely app', label: 'Signed onto Lovely app',
+    description: 'Finished the Lovely app’s onboarding sequence (Lovely › Users onboarding status tour_done) and started using the app. Dated by when the status reached tour_done; before that was tracked (2026-10-16), the app’s onboarding_done event, else the account’s signup date.',
+    store: { kind: 'milestone_table' },
+  },
+  {
     key: 'onboarding_call', short: 'Onb. call', label: 'Onboarding call',
     description: 'The booked onboarding walkthrough. This is customers.onboard_date — the date the FU1/FU2 follow-up calendar counts from.',
     store: { kind: 'customer_column', column: 'onboard_date' },
@@ -83,8 +89,8 @@ export const MILESTONES: readonly MilestoneDef[] = [
   },
 ];
 
-/** The three keys customer_timeline_milestones is allowed to hold. Mirrors the
- *  CHECK constraint in 20261007140000_customer_timeline_milestones.sql. */
+/** The keys customer_timeline_milestones is allowed to hold. Mirrors the CHECK
+ *  constraint in 20261023130000_timeline_app_onboarded.sql. */
 export const TABLE_MILESTONE_KEYS: MilestoneKey[] =
   MILESTONES.filter(m => m.store.kind === 'milestone_table').map(m => m.key);
 
@@ -128,7 +134,29 @@ export type DeliveryRow = { order_id: string; delivered_at: string };
 /** When a customer's Lovely app account was first seen. `customer_app_links` is
  *  the account link rather than the event stream, so it answers for a customer
  *  who paired an account before any event type we ingest fired. */
-export type AppLinkRow = { customer_id: string; first_seen_at: string | null };
+export type AppLinkRow = {
+  customer_id: string;
+  first_seen_at: string | null;
+  /** Lovely `users.id`. Optional so older callers and fixtures still fit. */
+  lovely_user_id?: string | null;
+};
+
+/** The slice of a Lovely › Users row the timeline reads. */
+export type TimelineLovelyUser = Pick<
+  LovelyUser, 'id' | 'email' | 'serial_number' | 'onboarding_step' | 'onboarding_step_at' | 'created_at'
+>;
+
+/** Where a customer is in the Lovely app's own onboarding sequence. Shown
+ *  beside the milestone so "not signed on yet" and "no Lovely account at all"
+ *  read differently — the date alone cannot say which. */
+export type AppOnboardingStatus = {
+  /** Lovely users.onboarding_step, e.g. 'hardware_done'. */
+  step: string | null;
+  /** Human label for the last step finished, e.g. 'Hardware walkthrough'. */
+  label: string;
+  /** True once the step is tour_done. */
+  done: boolean;
+};
 
 /** The slice of an order a timeline reads. Structurally satisfied by a full
  *  `Order`, so callers holding one can pass it straight through. */
@@ -166,6 +194,9 @@ export type CustomerTimeline = {
    *  matrix defaults to these: a lead who only ever placed an order has no
    *  timeline to speak of. */
   ownsMachine: boolean;
+  /** The customer's Lovely app account, matched by link, serial or email.
+   *  Null when no Lovely account could be matched. */
+  app: AppOnboardingStatus | null;
 };
 
 // ── Day normalisation ───────────────────────────────────────────────────────
@@ -230,6 +261,9 @@ export type TimelineInputs = {
   tickets: ServiceTicket[];
   events: CustomerEvent[];
   appLinks: AppLinkRow[];
+  /** Lovely › Users rows. Optional: the Lovely project may be unconfigured,
+   *  and the timeline must still render without it. */
+  lovelyUsers?: TimelineLovelyUser[];
   deliveries: DeliveryRow[];
   diagnosisCalls: DiagnosisCall[];
   overrides: TimelineOverride[];
@@ -253,6 +287,7 @@ export function buildTimelines(inputs: TimelineInputs): CustomerTimeline[] {
     customers, orders, units, lifecycle, tickets, events,
     appLinks, deliveries, diagnosisCalls, overrides,
   } = inputs;
+  const lovelyUsers = inputs.lovelyUsers ?? [];
 
   // ── Indexes, built once rather than per customer. At 404 customers × 283
   //    orders × 203 units a nested scan is ~2.3M comparisons on every keystroke
@@ -308,6 +343,34 @@ export function buildTimelines(inputs: TimelineInputs): CustomerTimeline[] {
     if (!day) continue;
     const prev = appFirstSeenByCustomer.get(a.customer_id);
     if (!prev || day < prev) appFirstSeenByCustomer.set(a.customer_id, day);
+  }
+
+  // Lovely users live in another project with no customer_id of their own.
+  // Match the way the ingest function does — the account link first, then the
+  // paired serial's unit, then email — and keep one account per customer,
+  // preferring the furthest-along one (a customer who re-registered should not
+  // read as stuck on their abandoned first account).
+  const customerByLovelyId = new Map<string, string>();
+  for (const a of appLinks) if (a.lovely_user_id) customerByLovelyId.set(a.lovely_user_id, a.customer_id);
+  const customerBySerial = new Map<string, string>();
+  for (const u of units) if (u.customer_id && u.serial) customerBySerial.set(u.serial.trim().toUpperCase(), u.customer_id);
+  const customerByEmail = new Map<string, string>();
+  for (const c of customers) if (c.email) customerByEmail.set(c.email.trim().toLowerCase(), c.id);
+
+  const stepRank = (step: string | null) => {
+    const i = ONBOARDING_STEPS.findIndex(s => s.code === step);
+    return i < 0 ? -1 : i;
+  };
+  const lovelyUserByCustomer = new Map<string, TimelineLovelyUser>();
+  for (const lu of lovelyUsers) {
+    const cid = customerByLovelyId.get(lu.id)
+      ?? (lu.serial_number ? customerBySerial.get(lu.serial_number.trim().toUpperCase()) : undefined)
+      ?? (lu.email ? customerByEmail.get(lu.email.trim().toLowerCase()) : undefined);
+    if (!cid) continue;
+    const prev = lovelyUserByCustomer.get(cid);
+    if (!prev || stepRank(lu.onboarding_step) > stepRank(prev.onboarding_step)) {
+      lovelyUserByCustomer.set(cid, lu);
+    }
   }
 
   const callsByCustomer = new Map<string, DiagnosisCall[]>();
@@ -384,8 +447,37 @@ export function buildTimelines(inputs: TimelineInputs): CustomerTimeline[] {
       { date: earliest(...cEvents.map(e => toDay(e.occurred_at))), source: 'customer_events (Lovely app)' },
     );
 
+    // Signed onto the Lovely app = the app's onboarding status is tour_done.
+    // Only a finished account resolves; anyone mid-setup stays blank and their
+    // step is reported on `app` instead. onboarding_step_at is when the status
+    // last changed, so on a tour_done row it IS the completion time — but it is
+    // only tracked from 2026-10-16. Older completions fall back to the app's
+    // onboarding_done event, then to the signup day, which is a lower bound and
+    // is labelled as one.
+    const lovelyUser = lovelyUserByCustomer.get(c.id) ?? null;
+    const appDone = lovelyUser?.onboarding_step === 'tour_done';
+    const appOnboarded = appDone
+      ? firstOf(
+          { date: toDay(lovelyUser?.onboarding_step_at), source: 'Lovely users.onboarding_step_at (tour_done)' },
+          {
+            date: earliest(...cEvents.filter(e => e.event_type === 'lovely.onboarding_done').map(e => toDay(e.occurred_at))),
+            source: 'customer_events lovely.onboarding_done',
+          },
+          { date: toDay(lovelyUser?.created_at), source: 'Lovely users.created_at (signup; completion time not tracked)' },
+        )
+      : { date: null, source: null };
+    const app: AppOnboardingStatus | null = lovelyUser
+      ? {
+          step: lovelyUser.onboarding_step,
+          label: ONBOARDING_STEPS.find(s => s.code === lovelyUser.onboarding_step)?.label
+            ?? lovelyUser.onboarding_step ?? 'Signed up',
+          done: appDone,
+        }
+      : null;
+
     const derivedByKey: Record<MilestoneKey, Derived> = {
-      ordered, shipped, received, onboarding_call: onboardingCall, onboarded, first_use: firstUse,
+      ordered, shipped, received, app_onboarded: appOnboarded,
+      onboarding_call: onboardingCall, onboarded, first_use: firstUse,
     };
 
     const milestones = {} as Record<MilestoneKey, MilestoneValue>;
@@ -438,6 +530,7 @@ export function buildTimelines(inputs: TimelineInputs): CustomerTimeline[] {
       milestones,
       diagnosisCalls: cCalls,
       ownsMachine: !!(shipped.date || received.date || cUnits.length > 0),
+      app,
     };
   });
 }
@@ -521,7 +614,8 @@ export function useTimelineOrders(): { orders: TimelineOrder[]; loading: boolean
   return { orders, loading };
 }
 
-/** Lovely app account links — the two columns the first-use derivation needs. */
+/** Lovely app account links — first-use dates, and the lovely_user_id the
+ *  Lovely › Users rows are matched on. */
 export function useCustomerAppLinks(): { appLinks: AppLinkRow[]; loading: boolean } {
   const [appLinks, setAppLinks] = useState<AppLinkRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -531,7 +625,7 @@ export function useCustomerAppLinks(): { appLinks: AppLinkRow[]; loading: boolea
     (async () => {
       const { data } = await supabase
         .from('customer_app_links')
-        .select('customer_id, first_seen_at')
+        .select('customer_id, first_seen_at, lovely_user_id')
         .not('customer_id', 'is', null);
       if (!live) return;
       setAppLinks((data ?? []) as AppLinkRow[]);
@@ -633,7 +727,7 @@ export function useTimelineOverrides(): {
 /** Set an operator date for one milestone.
  *
  *  `day` is 'YYYY-MM-DD'. Dispatches on the milestone's store so the caller
- *  never has to know that three of the six live on `customers` — and so a date
+ *  never has to know that three of the seven live on `customers` — and so a date
  *  typed against the onboarding call lands in onboard_date, where the FU1/FU2
  *  calendar reads it. */
 export async function setMilestoneOverride(

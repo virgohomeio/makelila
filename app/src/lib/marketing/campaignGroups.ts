@@ -17,14 +17,31 @@ const EXCLUDE = /\bmini\b/i;
 const DEFS: {
   key: string; name: string; match: RegExp;
   start: string; end: string | null; discount: string;
+  // When set, the label uses `discount` verbatim and ignores any "% off" parsed
+  // off a matched Meta campaign name (used where the live ads still carry last
+  // season's discount in their name but the operator wants the real figure shown).
+  fixedDiscount?: boolean;
 }[] = [
-  { key: 'fall',       name: 'Fall Sale 2026',             match: /fall/i,                                                     start: '2026-09-02', end: null,         discount: '20% Off' },
+  // Holiday 2026 and December Holiday 2025 are split by YEAR in the name, not by a
+  // bare "holiday" keyword. Both seasons' campaigns say "Holiday" — the 2026 ads
+  // are "Holiday 2026 - 30 Percent Off …" and last year's are "December Holiday
+  // 2025 v1-v5 - 35% Off …" — so an unqualified /holiday/ on the 2026 group swept
+  // all five 2025 campaigns' LIFETIME spend into the 2026 number (≈$5.7k of noise
+  // on top of the real ≈$1.8k). Requiring the year keeps each season's spend in
+  // its own group. 2026 is still listed first for precedence; fixedDiscount pins
+  // the label to 30% even though the clean 2026 name already parses to it.
+  { key: 'holiday2026', name: 'Holiday 2026',               match: /holiday\s*2026|christmas\s*2026|xmas\s*2026|black[\s-]?friday|bfcm|cyber[\s-]?monday/i, start: '2026-11-20', end: '2026-12-31', discount: '30% Off', fixedDiscount: true },
+  // December sits here, above 'latespring', ON PURPOSE: the 2025 ads are named
+  // "December Holiday 2025 v2…", and latespring's bare /\bv2\b/ would otherwise
+  // claim the "v2" campaign ($3k) before this group ever saw it. "December" is a
+  // unique, specific keyword, so matching it first is safe.
+  { key: 'december',   name: 'December Holiday 2025',      match: /december|holiday\s*2025|christmas\s*2025|xmas\s*2025/i,     start: '2025-12-08', end: '2025-12-31', discount: '35% Off' },
+  { key: 'fall',       name: 'Fall Sale 2026',             match: /fall/i,                                                     start: '2026-09-02', end: '2026-11-19', discount: '20% Off' },
   { key: 'summer',     name: 'Summer Pre Order 2026',      match: /summer|pre[\s-]?order/i,                                    start: '2026-06-03', end: '2026-09-01', discount: '25% Off' },
   { key: 'latespring', name: 'Late Spring Sale (v2) 2026', match: /late[\s-]?spring|spring[^a-z]*(v ?2|version 2)|\bv2\b/i,     start: '2026-05-11', end: '2026-06-02', discount: '20% Off' },
   { key: 'spring',     name: 'Spring Sale 2026',           match: /spring/i,                                                   start: '2026-04-01', end: '2026-05-10', discount: '30% Off' },
   { key: 'march',      name: 'March Sale 2026',            match: /march/i,                                                    start: '2026-03-01', end: '2026-03-31', discount: '10% Off' },
   { key: 'winter',     name: 'Winter Sale 2026',           match: /winter/i,                                                   start: '2026-01-01', end: '2026-02-28', discount: '30% Off' },
-  { key: 'december',   name: 'December Holiday 2025',      match: /december|holiday|christmas|xmas/i,                          start: '2025-12-08', end: '2025-12-31', discount: '35% Off' },
 ];
 
 /** Pull a human discount label out of a campaign name, if present. */
@@ -41,10 +58,28 @@ export function parseDiscount(name: string): string | null {
 export type CampaignGroup = {
   key: string;
   label: string;          // "Winter Sale 2026 - 30% Off"
-  ids: Set<string>;       // Meta campaign_ids in this group (for ad spend)
+  ids: Set<string>;       // Meta campaign_ids in this group (for Meta ad spend)
+  /** The name matcher behind this group. Meta spend is summed by `ids` (resolved
+   *  at build time from the synced campaigns), but Google Ads campaigns aren't
+   *  known here, so the Report filters Google rows by this same regex at read
+   *  time — see groupMatchesName. */
+  match: RegExp;
   startDate: string;      // inclusive YYYY-MM-DD
   endDate: string | null; // inclusive; null = ongoing
 };
+
+/** Does a campaign NAME belong to this group? Applies the same two rules the
+ *  Meta id-assignment uses: the LILA Mini exclusion, then the group's own
+ *  matcher. Used to filter Google Ads campaigns (which have no pre-resolved id
+ *  set) into a group. NOTE: this is a plain name match, so it does NOT enforce
+ *  the first-match precedence between overlapping groups the way
+ *  buildCampaignGroups does for Meta — the group regexes are year/word specific
+ *  enough that a Google campaign name lands in one group, but if two groups ever
+ *  share a keyword, a Google campaign could match both. */
+export function groupMatchesName(group: CampaignGroup, name: string | null): boolean {
+  if (!name) return false;
+  return !EXCLUDE.test(name) && group.match.test(name);
+}
 
 /** Build the fixed sale windows, attaching each group's matched Meta campaigns
  *  (for spend) and its discount (parsed off the campaign names, else fallback).
@@ -63,11 +98,12 @@ export function buildCampaignGroups(campaigns: FbCampaign[]): CampaignGroup[] {
       if (c.campaign_id) ids.add(c.campaign_id);
       if (!parsed) parsed = parseDiscount(name);
     }
-    const discount = parsed ?? def.discount;
+    const discount = def.fixedDiscount ? def.discount : (parsed ?? def.discount);
     return {
       key: def.key,
       label: discount ? `${def.name} - ${discount}` : def.name,
       ids,
+      match: def.match,
       startDate: def.start,
       endDate: def.end,
     };

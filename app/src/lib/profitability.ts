@@ -218,6 +218,7 @@ export type CustomerMetrics = {
     installation: number;
     consumables: number;
     fulfilment: number;
+    customs: number;
   };
   variableCosts: number;
   contributionMargin: number;
@@ -240,6 +241,15 @@ export type CustomerMetrics = {
   country: string | null;
 };
 
+/** Bucket 2, freight. View freight plus uploaded shipping invoices marked
+ *  counts_in_shipping; an operator override replaces the lot (see
+ *  applyCostAdjustments in lib/shippingInvoices.ts). */
+export function shippingCostCad(row: CustomerProfitability): number {
+  if (row.shipping_override_cad != null) return row.shipping_override_cad;
+  return (row.sale_shipping_cad ?? 0) + (row.legacy_shipping_cad ?? 0)
+       + (row.uploaded_shipping_cad ?? 0);
+}
+
 /** Every cost we can attribute to this customer, one bucket each.
  *  A null support or return-handling cost means the rate is unset — counted as
  *  0 here so the arithmetic works, and flagged by `costCoverage` so the UI can
@@ -260,7 +270,7 @@ export function variableCosts(row: CustomerProfitability): CustomerMetrics['cost
     // Order-level freight plus the pre-Freightcom shipments, which are
     // attributed per customer because most of that cohort has no order to
     // hang them on. Both are freight, so both are bucket 2.
-    shipping:       (row.sale_shipping_cad ?? 0) + (row.legacy_shipping_cad ?? 0),
+    shipping:       shippingCostCad(row),
     warranty:       row.expected_warranty_cost_cad ?? 0,
     refunds:        row.expected_refund_cad ?? 0,
     support:        row.support_cost_cad ?? 0,
@@ -270,6 +280,9 @@ export function variableCosts(row: CustomerProfitability): CustomerMetrics['cost
     installation:   row.installation_cost_cad ?? 0,
     consumables:    row.consumables_cost_cad ?? 0,
     fulfilment:     row.fulfilment_cost_cad ?? 0,
+    // Bucket 12: customs/duty we covered for the customer — US shipments are
+    // DDU, so UPS bills the customer and we reimburse some or all of it.
+    customs:        row.customs_covered_cad ?? 0,
   };
 }
 
@@ -277,7 +290,7 @@ export function sumCosts(costs: CustomerMetrics['costs']): number {
   return costs.cogs + costs.shipping + costs.warranty + costs.refunds
        + costs.support + costs.returnHandling + costs.paymentFees
        + costs.commission + costs.installation + costs.consumables
-       + costs.fulfilment;
+       + costs.fulfilment + costs.customs;
 }
 
 /** Whole days between two dates, or null if either is missing. */
@@ -438,6 +451,8 @@ export function costsBasis(row: CustomerProfitability): CostsBasis {
     consumables: 'actual',
     // Contracted 3PL rate card, with no invoice yet to reconcile against.
     fulfilment: 'estimated',
+    // Entered by an operator from the duty invoice / reimbursement.
+    customs: 'actual',
   };
 }
 
@@ -461,6 +476,7 @@ export const BUCKET_LABEL: Record<keyof CustomerMetrics['costs'], string> = {
   installation: 'Installation',
   consumables: 'Consumables',
   fulfilment: '3PL handling',
+  customs: 'Customs & duties',
 };
 
 /** Roll the per-bucket bases up into a verdict on the margin itself. Anything
@@ -773,9 +789,10 @@ export function aggregateCosts(metrics: CustomerMetrics[]): CustomerMetrics['cos
     installation:   acc.installation   + m.costs.installation,
     consumables:    acc.consumables    + m.costs.consumables,
     fulfilment:     acc.fulfilment     + m.costs.fulfilment,
+    customs:        acc.customs        + m.costs.customs,
   }), { cogs: 0, shipping: 0, warranty: 0, refunds: 0, support: 0,
         returnHandling: 0, paymentFees: 0, commission: 0, installation: 0,
-        consumables: 0, fulfilment: 0 });
+        consumables: 0, fulfilment: 0, customs: 0 });
 }
 
 export type WaterfallStep = {
@@ -806,6 +823,7 @@ export function waterfall(metrics: CustomerMetrics[], cacTotal: number): Waterfa
     { label: 'Installation',     value: -c.installation,     isTotal: false },
     { label: 'Consumables',      value: -c.consumables,      isTotal: false },
     { label: '3PL handling',     value: -c.fulfilment,       isTotal: false },
+    { label: 'Customs & duties', value: -c.customs,          isTotal: false },
     { label: 'Contribution',     value: contribution,        isTotal: true },
     { label: 'CAC',              value: -cacTotal,           isTotal: false },
     { label: 'Lifetime profit',  value: contribution - cacTotal, isTotal: true },

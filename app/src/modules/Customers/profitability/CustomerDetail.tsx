@@ -4,6 +4,7 @@ import {
   type CustomerMetrics, type BucketBasis,
 } from '../../../lib/profitability';
 import { regionName } from '../../../lib/regions';
+import { CustomerShippingInvoices, ProfitabilityAdjustmentEditor } from '../../../components/ShippingInvoices';
 import { DIVERGING } from './palette';
 import styles from '../Customers.module.css';
 
@@ -16,11 +17,13 @@ import styles from '../Customers.module.css';
  *  quietly rounded into the total.
  */
 export function CustomerDetail({
-  row, metrics, onClose,
+  row, metrics, onClose, onChanged,
 }: {
   row: CustomerProfitability;
   metrics: CustomerMetrics;
   onClose: () => void;
+  /** Refetch profitability after an adjustment or shipping invoice changes. */
+  onChanged?: () => void;
 }) {
   const coverage = costCoverage(row);
   const basis = costsBasis(row);
@@ -70,9 +73,15 @@ export function CustomerDetail({
             <Row label="Legacy freight"  value={row.legacy_shipment_count > 0
                    ? `${money(row.legacy_shipping_cad)} · ${row.legacy_shipment_count} pre-Freightcom`
                    : money(0)} />
-            <Row label="Shipping"        value={<>{row.shipping_invoiced_count > 0
+            {(row.uploaded_shipping_cad ?? 0) > 0 && (
+              <Row label="Uploaded freight" value={`${money(row.uploaded_shipping_cad ?? 0)} · ${row.shipping_invoice_count ?? 0} invoice(s)`} />
+            )}
+            <Row label="Shipping"        value={<>{row.shipping_override_cad != null
+                   ? `${money(metrics.costs.shipping)} · overridden`
+                   : row.shipping_invoiced_count > 0
                    ? `${money(metrics.costs.shipping)} · ${row.shipping_invoiced_count} invoiced`
                    : money(metrics.costs.shipping)}<Est basis={basis.shipping} /></>} />
+            <Row label="Customs & duties" value={money(metrics.costs.customs)} />
             <Row label="Warranty"        value={money(metrics.costs.warranty)} />
             <Row label="Refunds"         value={money(metrics.costs.refunds)} />
             <Row label="Support"         value={row.support_cost_cad == null && row.diagnosis_call_count > 0
@@ -127,6 +136,16 @@ export function CustomerDetail({
                         : `${row.diagnosis_call_count} (${Math.round(row.diagnosis_minutes)} min)`} />
           </dl>
         </section>
+      </div>
+
+      <div className={styles.detailUsage}>
+        <h4>Adjust profitability</h4>
+        <ProfitabilityAdjustmentEditor customerId={row.id} customerName={row.full_name} onSaved={onChanged} />
+      </div>
+
+      <div className={styles.detailUsage}>
+        <h4>Shipping invoices</h4>
+        <CustomerShippingInvoices customerId={row.id} onChanged={onChanged} />
       </div>
 
       <div className={styles.detailUsage}>

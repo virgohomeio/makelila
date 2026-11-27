@@ -100,3 +100,42 @@ describe('uploadTestReports — MAC capture', () => {
     expect(updateMock).not.toHaveBeenCalled();
   });
 });
+
+describe('uploadTestReports — China vs Canada slots', () => {
+  beforeEach(() => {
+    uploadMock.mockClear(); updateMock.mockClear(); eqMock.mockClear(); logActionMock.mockClear();
+  });
+
+  it('a Canada .md report fills only the canada_* columns — never the China result or MAC', async () => {
+    const out = await uploadTestReports([report('LL01-A', MAC)], valid, new Map(), { origin: 'canada' });
+    expect(out[0]).toMatchObject({ serial: 'LL01-A', status: 'paired', origin: 'canada' });
+    const patch = patchFor('LL01-A');
+    expect(patch).toMatchObject({ canada_test_report_name: 'LL01-A.md' });
+    expect(String(patch.canada_test_report_path)).toMatch(/^LL01-A\/canada\//);
+    expect(patch).not.toHaveProperty('electrical_check');
+    expect(patch).not.toHaveProperty('mac_address');
+    expect(patch).not.toHaveProperty('test_report_path');
+  });
+
+  it('a Canada PDF is paired by filename and stored as application/pdf', async () => {
+    const pdf = new File(['%PDF-1.4'], 'LL01-B.pdf', { type: 'application/pdf' });
+    const out = await uploadTestReports([pdf], valid, new Map(), { origin: 'canada' });
+    expect(out[0]).toMatchObject({ serial: 'LL01-B', status: 'paired' });
+    expect(uploadMock.mock.calls[0]).toEqual([
+      expect.stringMatching(/^LL01-B\/canada\//), pdf, { contentType: 'application/pdf', upsert: false },
+    ]);
+  });
+
+  it('a forced serial (QC modal upload) overrides the serial inside the file', async () => {
+    const out = await uploadTestReports([report('LL01-A')], new Set(['LL01-B']), new Map(), { origin: 'china', serial: 'LL01-B' });
+    expect(out[0]).toMatchObject({ serial: 'LL01-B', status: 'paired' });
+    expect(patchFor('LL01-B')).toMatchObject({ test_report_name: 'LL01-A.md', electrical_check: 'pass' });
+  });
+
+  it('rejects a PDF in the China slot (it must be the parseable .md)', async () => {
+    const pdf = new File(['%PDF-1.4'], 'LL01-A.pdf', { type: 'application/pdf' });
+    const out = await uploadTestReports([pdf], valid, new Map());
+    expect(out[0]).toMatchObject({ status: 'error' });
+    expect(uploadMock).not.toHaveBeenCalled();
+  });
+});

@@ -6,6 +6,7 @@ const Dashboard = lazy(() => import('../Dashboard'));
 import {
   useCustomers, syncCustomersFromHubspot, exportPurchasers, pushToKlaviyo,
   setPurchaser, setPrimaryUser, updateCustomerContact, PRIMARY_USER_RELATIONSHIPS,
+  useUnitPrimaryUsers,
   useAllCustomerAdditionalUsers, matchCustomerSearch,
   type Customer, type CustomerAdditionalUser,
 } from '../../lib/customers';
@@ -29,9 +30,12 @@ import { MobileBackHeader } from '../../components/MobileBackHeader';
 import { RouteErrorBoundary } from '../../components/RouteErrorBoundary';
 import { useCustomerEvents, useCustomerEngagement, eventMeta, dormancyBadge } from '../../lib/customerEvents';
 import { useCustomerInvoices, openInvoiceInNewTab } from '../../lib/invoices';
+import { CustomerShippingInvoices } from '../../components/ShippingInvoices';
+import { InvoiceUploadPicker } from '../../components/InvoiceUploadPicker';
 import { PanelSection, PanelRow } from './Panel';
 import { NameSection } from './NameSection';
 import { AdditionalUsersSection } from './AdditionalUsersSection';
+import { UnitPrimaryUserLine } from './UnitPrimaryUserLine';
 import {
   PageHeader, Tabs, Chip, ChipRow, Button, EmptyState,
 } from '../../components/ui';
@@ -876,7 +880,12 @@ function PurchaserLinkSection({ customer, allCustomers, onChanged }: {
 // and what gets saved is whatever was typed there.
 const OTHER_RELATIONSHIP = 'Other…';
 
-function PrimaryUserSection({ customer, onChanged }: { customer: Customer; onChanged: () => void }) {
+function PrimaryUserSection({ customer, multiUnit, onChanged }: {
+  customer: Customer;
+  /** Holds more than one machine — point at the per-machine editor. */
+  multiUnit: boolean;
+  onChanged: () => void;
+}) {
   const [name, setName] = useState(customer.primary_user_name ?? '');
   const [phone, setPhone] = useState(customer.primary_user_phone ?? '');
   const [email, setEmail] = useState(customer.primary_user_email ?? '');
@@ -931,6 +940,10 @@ function PrimaryUserSection({ customer, onChanged }: { customer: Customer; onCha
       <div className={styles.kvLabel} style={{ marginBottom: 4 }}>
         Who actually uses the machine, when different from the purchaser (e.g. a spouse), and how they
         relate to the purchaser. Shown on the refund card.
+        {multiUnit && (
+          <> This customer holds several machines — this is the default for all of them;
+            set a different primary user per machine under <strong>Shipped units</strong> below.</>
+        )}
       </div>
       <input className={styles.searchInput} placeholder="Primary user name (e.g. Sarah Lockhart)"
         value={name} disabled={busy} onChange={e => setName(e.target.value)} />
@@ -976,6 +989,9 @@ function CustomerDetailPanel({ customer, address, allCustomers, onChanged, onClo
   const { all: orders } = useOrders();
   const { units } = useUnits();
   const { tickets } = useServiceTickets();
+  // Bumped by the Upload invoice picker so the invoice lists reload.
+  const [salesInvoiceRev, setSalesInvoiceRev] = useState(0);
+  const [shippingInvoiceRev, setShippingInvoiceRev] = useState(0);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
@@ -992,6 +1008,10 @@ function CustomerDetailPanel({ customer, address, allCustomers, onChanged, onClo
   // used to disagree: the row hid returned machines while opening the same
   // customer listed them as still held.
   const myUnits = heldUnitsForCustomer(customer, units);
+  // Per-machine primary users — for a purchaser whose machines went to
+  // different people. Unset machines fall back to the customer-level one.
+  const { bySerial: unitUsers, refresh: refreshUnitUsers } = useUnitPrimaryUsers(customer.id);
+  const defaultUserName = customer.primary_user_name?.trim() || customer.full_name;
   const myTickets = lcEmail
     ? tickets.filter(t => t.customer_email?.toLowerCase() === lcEmail)
     : [];
@@ -1016,7 +1036,7 @@ function CustomerDetailPanel({ customer, address, allCustomers, onChanged, onClo
           <ContactSection customer={customer} address={address} onChanged={onChanged} />
 
           <PurchaserLinkSection customer={customer} allCustomers={allCustomers} onChanged={onChanged} />
-          <PrimaryUserSection customer={customer} onChanged={onChanged} />
+          <PrimaryUserSection customer={customer} multiUnit={myUnits.length > 1} onChanged={onChanged} />
           <AdditionalUsersSection customerId={customer.id} />
 
           <LilaAppActivitySection customerId={customer.id} />
@@ -1126,6 +1146,13 @@ function CustomerDetailPanel({ customer, address, allCustomers, onChanged, onClo
                         ? <span className={styles.mono}>{u.tracking_num}</span>
                         : <span className={styles.missingTracking}>missing</span>}
                     </div>
+                    <UnitPrimaryUserLine
+                      serial={u.serial}
+                      customerId={customer.id}
+                      row={unitUsers.get(u.serial)}
+                      fallbackName={defaultUserName}
+                      onChanged={() => void refreshUnitUsers()}
+                    />
                   </div>
                 ))
             }
@@ -1144,7 +1171,17 @@ function CustomerDetailPanel({ customer, address, allCustomers, onChanged, onClo
             }
           </PanelSection>
 
-          <CustomerInvoicesSection customerId={customer.id} />
+          <CustomerInvoicesSection customerId={customer.id} reloadSignal={salesInvoiceRev} />
+          <PanelSection title="Shipping invoices">
+            <CustomerShippingInvoices customerId={customer.id} showForm={false} reloadSignal={shippingInvoiceRev} />
+            <InvoiceUploadPicker
+              key={customer.id}
+              customerId={customer.id}
+              onUploaded={kind => kind === 'sales'
+                ? setSalesInvoiceRev(n => n + 1)
+                : setShippingInvoiceRev(n => n + 1)}
+            />
+          </PanelSection>
         </div>
       </div>
     </div>
@@ -1230,8 +1267,9 @@ function LilaAppActivitySection({ customerId }: { customerId: string }) {
 // Invoices & refund receipts filed against this customer by the Upload module.
 // Auto-matched from the Shopify order # on the PDF (or assigned manually from
 // the Upload review queue).
-function CustomerInvoicesSection({ customerId }: { customerId: string }) {
-  const { invoices, loading } = useCustomerInvoices(customerId);
+function CustomerInvoicesSection({ customerId, reloadSignal = 0 }: { customerId: string; reloadSignal?: number }) {
+  const { invoices, loading, reload } = useCustomerInvoices(customerId);
+  useEffect(() => { if (reloadSignal) void reload(); }, [reloadSignal, reload]);
 
   const view = async (path: string) => {
     try { await openInvoiceInNewTab(path); }
@@ -1243,7 +1281,7 @@ function CustomerInvoicesSection({ customerId }: { customerId: string }) {
       {loading ? (
         <div className={styles.emptyRow}>Loading invoices…</div>
       ) : invoices.length === 0 ? (
-        <div className={styles.emptyRow}>No invoices on file. Upload them in the Upload tab.</div>
+        <div className={styles.emptyRow}>No invoices on file. Use Upload invoice below to add one.</div>
       ) : (
         invoices.map(inv => (
           <div key={inv.id} className={styles.itemRow}>

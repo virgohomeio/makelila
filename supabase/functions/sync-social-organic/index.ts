@@ -1,17 +1,33 @@
 // sync-social-organic: pull organic Facebook Page + linked Instagram metrics
-// into social_metrics. Reuses the Meta token (must also carry
-// pages_read_engagement, instagram_basic, instagram_manage_insights) + a Page ID.
+// into social_metrics. Reuses the Meta token (must carry pages_read_engagement,
+// read_insights, instagram_basic, instagram_manage_insights) + a Page ID.
 //
-// v1 pulls the stable object fields — follower counts + post counts — which
-// don't churn across Graph API versions. Reach/engagement (which need the
-// version-sensitive /insights metrics) are a follow-up. YouTube / LinkedIn /
-// TikTok are separate functions (separate apps) and not handled here.
+// Captures stable stock metrics (followers, post counts) AND flow metrics
+// (reach / views / engagement over a trailing 28 days) via /insights.
+//
+// Robustness notes (Meta churns these constantly):
+//  - Page insights + /published_posts need a PAGE access token, not the
+//    system-user token. We mint it from the Page node's `access_token` field
+//    (the system user has the Page assigned, so this is allowed).
+//  - Meta retired a swathe of Page insight metrics through 2026 (e.g.
+//    page_impressions_unique → page_total_media_view_unique). We try a small
+//    CANDIDATE LIST per metric and keep the first that returns a number, so a
+//    rename doesn't zero the column. Each call is isolated — one failure stores
+//    null + a note in `raw`, never fails the whole sync (followers always land).
+//  - Instagram account insights dropped `impressions` and reject `days_28` for
+//    these metrics, so we aggregate `period=day` over a 28-day since/until window
+//    with metric_type=total_value.
+//
+// YouTube / TikTok / LinkedIn are separate apps/tokens → separate functions.
 //
 // Secrets: META_SYSTEM_USER_TOKEN, META_PAGE_ID, optional META_API_VERSION.
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
 import { corsHeaders } from '../_shared/cors.ts';
 import { authenticate } from '../_shared/auth.ts';
+
+type InsightValue = { value: unknown };
+type InsightDatum = { name: string; values?: InsightValue[]; total_value?: { value?: number } };
 
 Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
@@ -31,46 +47,246 @@ Deno.serve(async (req: Request) => {
   if (!token || !pageId) {
     return j({ error: 'Not configured: set META_SYSTEM_USER_TOKEN (with page + instagram scopes) and META_PAGE_ID in Edge Function secrets.' }, 400);
   }
+  const base = `https://graph.facebook.com/${ver}`;
+  const sysTok = encodeURIComponent(token);
+
+  const getJson = async (url: string): Promise<{ ok: boolean; status: number; body: Record<string, unknown> }> => {
+    const res = await fetch(url);
+    const body = await res.json().catch(() => ({})) as Record<string, unknown>;
+    return { ok: res.ok, status: res.status, body };
+  };
+  const errMsg = (body: Record<string, unknown>, status: number): string =>
+    String((body as { error?: { message?: string } }).error?.message ?? status).slice(0, 160);
+  // Last value of a period-series insight metric (trailing-28d).
+  const lastValue = (data: InsightDatum[] | undefined, name: string): number | null => {
+    for (const d of data ?? []) {
+      if (d.name !== name) continue;
+      const vals = d.values ?? [];
+      const last = vals.length ? vals[vals.length - 1].value : null;
+      return typeof last === 'number' ? last : null;
+    }
+    return null;
+  };
+  const totalValue = (data: InsightDatum[] | undefined, name: string): number | null => {
+    for (const d of data ?? []) if (d.name === name) return typeof d.total_value?.value === 'number' ? d.total_value.value : null;
+    return null;
+  };
 
   const asOf = new Date().toISOString().slice(0, 10);
-  const fields = 'name,fan_count,followers_count,instagram_business_account{id,username,followers_count,media_count}';
-  let body: Record<string, unknown>;
-  try {
-    const res = await fetch(`https://graph.facebook.com/${ver}/${pageId}?fields=${encodeURIComponent(fields)}&access_token=${encodeURIComponent(token)}`);
-    body = await res.json();
-    if (!res.ok) return j({ error: `Meta ${res.status}: ${JSON.stringify((body as { error?: unknown }).error ?? body).slice(0, 300)}` }, 502);
-  } catch (e) {
-    return j({ error: `Meta request failed: ${(e as Error).message}` }, 502);
-  }
-
-  const rows: Record<string, unknown>[] = [];
   const now = new Date().toISOString();
 
-  // Facebook Page
+  // 1) Page node: followers + linked IG + the PAGE ACCESS TOKEN we need for insights.
+  const fields = 'name,fan_count,followers_count,access_token,instagram_business_account{id,username,followers_count,media_count}';
+  const page = await getJson(`${base}/${pageId}?fields=${encodeURIComponent(fields)}&access_token=${sysTok}`);
+  if (!page.ok) {
+    return j({ error: `Meta ${page.status}: ${JSON.stringify((page.body as { error?: unknown }).error ?? page.body).slice(0, 300)}` }, 502);
+  }
+  const body = page.body;
+  const pageAccessToken = typeof body.access_token === 'string' ? body.access_token : token;
+  const pageTok = encodeURIComponent(pageAccessToken);
+  const notes: Record<string, string> = {};
+  if (!body.access_token) notes.page_token = 'no page access_token returned — using system token (insights may fail)';
+
+  // FB flow metric: try candidate names (Meta renames these), keep first numeric.
+  const fbInsight = async (key: string, candidates: string[], period: string): Promise<number | null> => {
+    let last = '';
+    for (const metric of candidates) {
+      try {
+        const r = await getJson(`${base}/${pageId}/insights?metric=${metric}&period=${period}&access_token=${pageTok}`);
+        if (r.ok) {
+          const v = lastValue(r.body.data as InsightDatum[] | undefined, metric);
+          if (typeof v === 'number') return v;
+          last = 'no value';
+        } else { last = errMsg(r.body, r.status); }
+      } catch (e) { last = (e as Error).message; }
+    }
+    notes[key] = last;
+    return null;
+  };
+
+  // 2) Facebook Page insights — reach / views / engagement over 28 days.
+  const fbReach = await fbInsight('fb_reach', ['page_total_media_view_unique', 'page_impressions_unique'], 'days_28');
+  const fbViews = await fbInsight('fb_views', ['page_total_media_views', 'page_impressions'], 'days_28');
+  const fbEng   = await fbInsight('fb_engagement', ['page_post_engagements', 'page_total_actions'], 'days_28');
+
+  // 3) Facebook published-post count (needs page token).
+  let fbPosts: number | null = null;
+  try {
+    const pc = await getJson(`${base}/${pageId}/published_posts?limit=0&summary=total_count&access_token=${pageTok}`);
+    if (pc.ok) {
+      const total = (pc.body.summary as { total_count?: number } | undefined)?.total_count;
+      fbPosts = typeof total === 'number' ? total : null;
+    } else { notes.fb_posts = errMsg(pc.body, pc.status); }
+  } catch (e) { notes.fb_posts = (e as Error).message; }
+
+  const rows: Record<string, unknown>[] = [];
   const fbFollowers = (body.followers_count as number | undefined) ?? (body.fan_count as number | undefined) ?? null;
   rows.push({
     channel: 'facebook', as_of: asOf,
-    followers: fbFollowers, reach: null, impressions: null, engagement: null, posts: null, views: null,
-    raw: { name: body.name, fan_count: body.fan_count, followers_count: body.followers_count }, synced_at: now,
+    followers: fbFollowers, reach: fbReach, impressions: fbViews, engagement: fbEng, posts: fbPosts, views: fbViews,
+    raw: { name: body.name, fan_count: body.fan_count, followers_count: body.followers_count, notes }, synced_at: now,
   });
 
-  // Linked Instagram business account
+  // 4) Instagram — followers/media (stable) + reach/engagement (28d via since/until).
   const ig = body.instagram_business_account as
     | { id?: string; username?: string; followers_count?: number; media_count?: number }
     | undefined;
   if (ig?.id) {
+    const igNotes: Record<string, string> = {};
+    const until = Math.floor(Date.now() / 1000);
+    const since = until - 28 * 86400;
+    const igInsight = async (metric: string): Promise<number | null> => {
+      try {
+        const r = await getJson(`${base}/${ig.id}/insights?metric=${metric}&period=day&metric_type=total_value&since=${since}&until=${until}&access_token=${pageTok}`);
+        if (r.ok) return totalValue(r.body.data as InsightDatum[] | undefined, metric);
+        igNotes[metric] = errMsg(r.body, r.status);
+      } catch (e) { igNotes[metric] = (e as Error).message; }
+      return null;
+    };
+    const igReach = await igInsight('reach');
+    const igEng = await igInsight('total_interactions');
     rows.push({
       channel: 'instagram', as_of: asOf,
-      followers: ig.followers_count ?? null, reach: null, impressions: null, engagement: null,
+      followers: ig.followers_count ?? null, reach: igReach, impressions: null, engagement: igEng,
       posts: ig.media_count ?? null, views: null,
-      raw: ig, synced_at: now,
+      raw: { ...ig, notes: igNotes }, synced_at: now,
     });
   }
+
+  // --- Per-post data for the cross-platform comparison (social_posts) ---
+  const estDate = (iso: string) => new Date(iso).toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
+  const firstVal = (data: InsightDatum[] | undefined, name: string): number | null => {
+    for (const d of data ?? []) if (d.name === name) {
+      const v = d.values?.[0]?.value ?? d.total_value?.value;
+      return typeof v === 'number' ? v : null;
+    }
+    return null;
+  };
+  const sPosts: Record<string, unknown>[] = [];
+  const nowIso = new Date().toISOString();
+  type FbPost = { id?: string; message?: string; created_time?: string; permalink_url?: string; shares?: { count?: number }; reactions?: { summary?: { total_count?: number } }; comments?: { summary?: { total_count?: number } } };
+  type IgMedia = { id?: string; caption?: string; media_type?: string; timestamp?: string; permalink?: string; like_count?: number; comments_count?: number };
+  try {
+    const f = 'id,message,created_time,permalink_url,shares,reactions.summary(true),comments.summary(true)';
+    const r = await getJson(`${base}/${pageId}/published_posts?fields=${encodeURIComponent(f)}&limit=25&access_token=${pageTok}`);
+    if (r.ok) {
+      for (const p of (r.body.data as FbPost[] | undefined) ?? []) {
+        if (!p.id) continue;
+        const reactions = p.reactions?.summary?.total_count ?? 0;
+        const comments = p.comments?.summary?.total_count ?? 0;
+        const shares = p.shares?.count ?? 0;
+        // Per-post reach + video views (lifetime). Metric names churn, so try a
+        // couple and keep what returns; non-fatal.
+        // Meta renamed post insight metrics in 2026 (post_impressions_unique →
+        // post_total_media_view_unique), so request both old + new and keep what
+        // returns. Each metric is requested on its own so one invalid name can't
+        // void the rest.
+        let reach: number | null = null, views: number | null = null;
+        const fbPostMetric = async (name: string): Promise<number | null> => {
+          try {
+            const pi = await getJson(`${base}/${p.id}/insights?metric=${name}&access_token=${pageTok}`);
+            if (pi.ok) return firstVal(pi.body.data as InsightDatum[] | undefined, name);
+          } catch { /* ignore */ }
+          return null;
+        };
+        reach = await fbPostMetric('post_total_media_view_unique') ?? await fbPostMetric('post_impressions_unique');
+        views = await fbPostMetric('post_video_views') ?? await fbPostMetric('post_total_media_views') ?? await fbPostMetric('post_impressions');
+        sPosts.push({
+          platform: 'facebook', post_id: p.id,
+          posted_at: p.created_time ?? null, posted_date: p.created_time ? estDate(p.created_time) : null,
+          caption: p.message ?? null, permalink: p.permalink_url ?? null, media_type: 'post',
+          views, likes: reactions, comments, shares, reach, engagement: reactions + comments + shares,
+          synced_at: nowIso,
+        });
+      }
+    } else { notes.fb_posts_feed = errMsg(r.body, r.status); }
+  } catch (e) { notes.fb_posts_feed = (e as Error).message; }
+
+  // Facebook Reels — the team's video content publishes as Reels, which do NOT
+  // appear in /published_posts (only plain feed posts do). Pull them from the
+  // /video_reels edge and read each reel's view count. Without this the "Meta"
+  // column is effectively Instagram-only for every video day.
+  type FbReel = { id?: string; description?: string; created_time?: string; permalink_url?: string; reactions?: { summary?: { total_count?: number } }; comments?: { summary?: { total_count?: number } } };
+  // Reel view count: metric names churn, so try the video node's `views` field
+  // first, then a candidate list of video_insights metrics. Non-fatal.
+  const fbVideoViews = async (id: string): Promise<number | null> => {
+    try {
+      const r = await getJson(`${base}/${id}?fields=views&access_token=${pageTok}`);
+      const v = (r.body as { views?: unknown }).views;
+      if (r.ok && typeof v === 'number') return v;
+    } catch { /* ignore */ }
+    for (const metric of ['blue_reels_play_count', 'post_video_views', 'total_video_views']) {
+      try {
+        const vi = await getJson(`${base}/${id}/video_insights?metric=${metric}&access_token=${pageTok}`);
+        if (vi.ok) { const v = firstVal(vi.body.data as InsightDatum[] | undefined, metric); if (typeof v === 'number') return v; }
+      } catch { /* ignore */ }
+    }
+    return null;
+  };
+  try {
+    const fullF = 'id,description,created_time,permalink_url,reactions.summary(true),comments.summary(true)';
+    let r = await getJson(`${base}/${pageId}/video_reels?fields=${encodeURIComponent(fullF)}&limit=25&access_token=${pageTok}`);
+    let withCounts = true;
+    // If the edge rejects the summary sub-fields, retry with bare fields so we
+    // still capture the reels (and their views) even without like/comment counts.
+    if (!r.ok) { r = await getJson(`${base}/${pageId}/video_reels?fields=${encodeURIComponent('id,description,created_time,permalink_url')}&limit=25&access_token=${pageTok}`); withCounts = false; }
+    if (r.ok) {
+      for (const p of (r.body.data as FbReel[] | undefined) ?? []) {
+        if (!p.id) continue;
+        const reactions = withCounts ? (p.reactions?.summary?.total_count ?? 0) : 0;
+        const comments = withCounts ? (p.comments?.summary?.total_count ?? 0) : 0;
+        const views = await fbVideoViews(p.id);
+        sPosts.push({
+          platform: 'facebook', post_id: p.id,
+          posted_at: p.created_time ?? null, posted_date: p.created_time ? estDate(p.created_time) : null,
+          caption: p.description ?? null, permalink: p.permalink_url ?? null, media_type: 'reel',
+          views, likes: reactions, comments, shares: 0, reach: null, engagement: reactions + comments,
+          synced_at: nowIso,
+        });
+      }
+    } else { notes.fb_reels_feed = errMsg(r.body, r.status); }
+  } catch (e) { notes.fb_reels_feed = (e as Error).message; }
+
+  if (ig?.id) {
+    try {
+      const f = 'id,caption,media_type,timestamp,permalink,like_count,comments_count';
+      const r = await getJson(`${base}/${ig.id}/media?fields=${encodeURIComponent(f)}&limit=25&access_token=${pageTok}`);
+      if (r.ok) {
+        for (const m of (r.body.data as IgMedia[] | undefined) ?? []) {
+          if (!m.id) continue;
+          const likes = m.like_count ?? 0, comments = m.comments_count ?? 0;
+          // Per-media views + reach. 'views' is the modern unified metric; fall
+          // back to reach-only for media types that reject it.
+          let reach: number | null = null, views: number | null = null;
+          try {
+            let pi = await getJson(`${base}/${m.id}/insights?metric=views,reach&access_token=${pageTok}`);
+            if (!pi.ok) pi = await getJson(`${base}/${m.id}/insights?metric=reach&access_token=${pageTok}`);
+            if (pi.ok) {
+              const dd = pi.body.data as InsightDatum[] | undefined;
+              views = firstVal(dd, 'views');
+              reach = firstVal(dd, 'reach');
+            }
+          } catch { /* leave null */ }
+          sPosts.push({
+            platform: 'instagram', post_id: m.id,
+            posted_at: m.timestamp ?? null, posted_date: m.timestamp ? estDate(m.timestamp) : null,
+            caption: m.caption ?? null, permalink: m.permalink ?? null, media_type: (m.media_type ?? '').toLowerCase() || null,
+            views, likes, comments, shares: null, reach, engagement: likes + comments,
+            synced_at: nowIso,
+          });
+        }
+      } else { notes.ig_posts_feed = errMsg(r.body, r.status); }
+    } catch (e) { notes.ig_posts_feed = (e as Error).message; }
+  }
+  if (sPosts.length) await admin.from('social_posts').upsert(sPosts, { onConflict: 'platform,post_id' });
 
   const { error } = await admin.from('social_metrics').upsert(rows, { onConflict: 'channel,as_of' });
   if (error) return j({ error: `DB upsert failed: ${error.message}` }, 500);
 
-  return j({ synced: rows.length, channels: rows.map(r => r.channel) });
+  return j({
+    synced: rows.length,
+    channels: rows.map(r => ({ channel: r.channel, followers: r.followers, reach: r.reach, engagement: r.engagement, posts: r.posts })),
+  });
 });
 
 function j(body: unknown, status = 200): Response {

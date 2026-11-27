@@ -94,6 +94,7 @@ export function EmailTab() {
             <tr style={{ color: subtle, fontSize: 11 }}>
               <th style={left}>Campaign</th>
               <th style={left}>Sent</th>
+              <th style={left}>Subject</th>
               <th style={right}>Recipients</th>
               <th style={right}>Open rate</th>
               <th style={right}>Click rate</th>
@@ -110,6 +111,9 @@ export function EmailTab() {
                   {c.name ?? c.campaign_id}
                 </td>
                 <td style={{ padding: '7px 10px', color: subtle }}>{day(c.send_time)}</td>
+                <td style={{ padding: '7px 10px', maxWidth: 260, overflow: 'hidden', textOverflow: 'ellipsis' }} title={c.subject_line ?? ''}>
+                  {c.subject_line ?? <span style={{ color: subtle }}>—</span>}
+                </td>
                 <td style={td}>{num(c.recipients)}</td>
                 <td style={td}>{pct(c.open_rate)}</td>
                 <td style={td}>{pct(c.click_rate)}</td>
@@ -120,7 +124,7 @@ export function EmailTab() {
               </tr>
             ))}
             {filtered.length === 0 && (
-              <tr><td colSpan={9} style={{ padding: 12, color: subtle }}>No campaigns sent in this window.</td></tr>
+              <tr><td colSpan={10} style={{ padding: 12, color: subtle }}>No campaigns sent in this window.</td></tr>
             )}
           </tbody>
         </table>

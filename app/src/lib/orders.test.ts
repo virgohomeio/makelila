@@ -585,6 +585,28 @@ describe('bucketOrders', () => {
     expect(b.cancelled).toEqual([]);
   });
 
+  // PRIORITY is a post-confirmation queue: a Walmart/Best Buy or hand-pinned
+  // order only enters it once CONFIRMED. A pending priority order stays in
+  // Pending and does not appear in priority yet. Reseller-driven leads hand-pinned.
+  it('collects only CONFIRMED reseller and hand-pinned orders into priority', () => {
+    const b = bucketOrders(
+      [mk({ id: 'plain',  status: 'pending',  placed_at: '2026-11-10T00:00:00Z' }),
+       mk({ id: 'walP',   status: 'pending',  placed_at: '2026-11-11T00:00:00Z', sales_channel: 'Walmart' }),
+       mk({ id: 'pinP',   status: 'pending',  placed_at: '2026-11-12T00:00:00Z', is_priority: true }),
+       mk({ id: 'bbC',    status: 'approved', placed_at: '2026-11-13T00:00:00Z', sales_channel: 'Best Buy' }),
+       mk({ id: 'pinC',   status: 'approved', placed_at: '2026-11-14T00:00:00Z', is_priority: true })],
+      none, none,
+    );
+    // Only the two confirmed ones, reseller (bbC) ahead of hand-pinned (pinC).
+    expect(b.priority.map(o => o.id)).toEqual(['bbC', 'pinC']);
+    // Pending priority orders are NOT in priority yet — they wait for confirm.
+    expect(b.priority.map(o => o.id)).not.toContain('walP');
+    expect(b.priority.map(o => o.id)).not.toContain('pinP');
+    // They stay in their real status buckets meanwhile.
+    expect(b.pending.map(o => o.id)).toEqual(['plain', 'walP', 'pinP']);
+    expect(b.approved.map(o => o.id)).toEqual(['bbC', 'pinC']);
+  });
+
   it('pulls a cancelled order out of every live tab and into cancelled', () => {
     const b = bucketOrders(
       [mk({ id: 'live', status: 'pending' }),

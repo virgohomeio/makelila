@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { supabase } from '../supabase';
 import { classifyChannel } from './journey';
 import { manualCreative, manualAge, manualGender } from './manualCreatives';
+import { regionName } from '../regions';
 import type { Order } from '../orders';
 
 // Auto sales-attribution report — the programmatic version of the manual
@@ -27,14 +28,28 @@ export type SalesRow = {
   last_referrer: string | null;
   plan: string;
   discount_codes: string[];
+  // Where the sale came through, as one of three buckets (see saleSourceOf):
+  // "Shopify Website" for our own storefront, or a reseller marketplace
+  // ("Walmart" / "Best Buy", plus "Shopify Collective"). Distinct from the
+  // marketing Source column (Meta Ad, Google Organic, …), which is *how the
+  // buyer was acquired*, not where they bought.
+  sale_source: string;
   revenue: number;
   currency: string;
+  // Shopify financial_status === 'refunded' — the customer got their money back
+  // in FULL. A 'partially_refunded' order is deliberately NOT a full refund (a
+  // balance remains), so it reads false here, matching how the rest of the app
+  // treats these two Shopify states (see SETTLED_FINANCIAL_STATUSES in orders.ts).
+  full_refund: boolean;
   // Derived from the buyer's Klaviyo events (null when we have none).
   purchase_time: string | null;
   journey_note: string | null;
   // Best-effort from Meta's purchase demographics (null when not a clean match).
   age: string | null;
   gender: string | null;
+  // Best-effort exact ad creative, from Meta's per-ad purchases (clean-day match;
+  // null when not unambiguous). Operator-tracked creative still overrides this.
+  creative: string | null;
   // Which campaign group this sale piled into (for verifying the bucketing).
   campaign_group: string | null;
 };
@@ -53,6 +68,9 @@ export type SalesKpis = {
   byProvince: Breakdown[];
   byPlan: Breakdown[];
   byDiscount: Breakdown[];
+  // Tally by sales channel (Shopify Website vs Walmart / Best Buy / Shopify
+  // Collective) so external reseller sales are totalled alongside our own.
+  bySource: Breakdown[];
 };
 
 export type Attribution = { source: string | null; medium: string | null; campaign: string | null };
@@ -65,11 +83,47 @@ export type Attribution = { source: string | null; medium: string | null; campai
 export function classifyPlan(o: Order): string {
   const pm = (o.payment_methods ?? []).map(s => s.toLowerCase());
   if (pm.some(p => p.includes('sezzle'))) return 'Sezzle';
+  // Klarna is a separate BNPL provider shown on the Shopify order's payment
+  // method — track it distinctly like Sezzle.
+  if (pm.some(p => p.includes('klarna'))) return 'Klarna';
   const text = (o.line_items ?? []).map(li => ('name' in li ? li.name : '')).join(' ').toLowerCase();
   if (/36[\s-]*month/.test(text)) return '36-Month Plan';
   if (/12[\s-]*month/.test(text)) return '12-Month Plan';
   if (/financ|payment plan|monthly/.test(text)) return 'Financing';
   return 'Outright';
+}
+
+// Pedrum's own test purchases on Shopify are not real sales. They must be kept
+// out of the Journey Report entirely — both the displayed rows AND the per-day
+// sale counts that drive the age/gender/creative clean-day match (a stray test
+// order on a real sale's day would otherwise make that day look ambiguous and
+// block the match). Matches his name or email; extend the pattern for any other
+// test buyer.
+const TEST_BUYER = /pedrum|support\s*lila/i;
+// Known internal test discount codes — these orders aren't real sales. Extend
+// as new test codes appear. (An explicit list, not a /test/ match, so a real
+// promo like "LATEST" is never excluded by accident.)
+const TEST_CODES = new Set(['TESTPEDRUMTEST', 'USTYLERTEST', 'TESTCAMP', 'GOOGLEADSTEST']);
+export function isTestOrder(o: Order): boolean {
+  if (TEST_BUYER.test(o.customer_email ?? '') || TEST_BUYER.test(o.customer_name ?? '')) return true;
+  return (o.discount_codes ?? []).some(c => TEST_CODES.has(c.toUpperCase().trim()));
+}
+
+// A proper sale is $500 CAD or more. Anything under that is a LILA Mini $1
+// reservation or a lease/finance instalment — NOT a real sale — and is kept out
+// of the Journey Report entirely (rows, KPIs, and the clean-day counts).
+// `total_usd` holds the order's OWN currency (see the Order type), so USD orders
+// are converted to CAD before the threshold. The real-sale gap is wide
+// (reservations/instalments are tens of dollars; sales are $1,000+), so the
+// approximate FX rate never affects which side of $500 an order lands on.
+const USD_TO_CAD = 1.37;
+const MIN_SALE_CAD = 500;
+export function orderValueCad(o: Order): number {
+  const v = o.total_usd ?? 0;
+  return (o.currency ?? 'USD').toUpperCase() === 'CAD' ? v : v * USD_TO_CAD;
+}
+export function isRealSale(o: Order): boolean {
+  return orderValueCad(o) >= MIN_SALE_CAD;
 }
 
 function bump(map: Map<string, Breakdown>, key: string, revenue: number) {
@@ -81,6 +135,21 @@ function bump(map: Map<string, Breakdown>, key: string, revenue: number) {
 }
 
 const sortBreakdown = (m: Map<string, Breakdown>) => Array.from(m.values()).sort((a, b) => b.revenue - a.revenue);
+
+/** Breakdown label for a sale's province/state: a country flag plus the full
+ *  name ("🇨🇦 Ontario", "🇺🇸 California") instead of the bare code. `regionName`
+ *  wants a "CA-ON" style code and echoes that code back when it can't map it, so
+ *  fall back to the bare region in that case (never "CA-ON"), and to a plain dash
+ *  when the order has no region at all. */
+export function provinceLabel(country: string | null | undefined, region: string | null | undefined): string {
+  const r = (region ?? '').trim();
+  if (!r) return '—';
+  const c = (country ?? '').trim().toUpperCase();
+  const flag = c === 'CA' ? '🇨🇦 ' : c === 'US' ? '🇺🇸 ' : '';
+  const named = c ? regionName(`${c}-${r}`) : r;
+  const name = named.includes('-') ? r : named;
+  return `${flag}${name}`;
+}
 
 export type JourneyInfo = { timeLabel: string | null; note: string | null };
 export type Demo = { age: string | null; gender: string | null };
@@ -98,6 +167,7 @@ export function buildSalesReport(
   campaignName?: (raw: string) => string | null,
   demo?: (o: Order) => Demo,
   groupOf?: (o: Order) => string | null,
+  creativeOf?: (o: Order) => string | null,
 ): { rows: SalesRow[]; kpis: SalesKpis } {
   const sales = orders.filter(o => o.kind !== 'replacement');
 
@@ -105,6 +175,7 @@ export function buildSalesReport(
   const byProvince = new Map<string, Breakdown>();
   const byPlan = new Map<string, Breakdown>();
   const byDiscount = new Map<string, Breakdown>();
+  const bySource = new Map<string, Breakdown>();
 
   const rows: SalesRow[] = sales.map(o => {
     const a = resolve(o);
@@ -112,10 +183,12 @@ export function buildSalesReport(
     const plan = classifyPlan(o);
     const codes = o.discount_codes ?? [];
     const revenue = o.total_usd ?? 0;
+    const saleSource = saleSourceOf(o);
 
     bump(byChannel, channel, revenue);
-    bump(byProvince, o.region_state ?? '—', revenue);
+    bump(byProvince, provinceLabel(o.country, o.region_state), revenue);
     bump(byPlan, plan, revenue);
+    bump(bySource, saleSource, revenue);
     if (codes.length === 0) bump(byDiscount, 'No code', revenue);
     else for (const c of codes) bump(byDiscount, c, revenue);
 
@@ -133,12 +206,15 @@ export function buildSalesReport(
       last_referrer: o.attribution_last_referrer ?? null,
       plan,
       discount_codes: codes,
+      sale_source: saleSource,
       revenue,
       currency: o.currency || 'USD',
+      full_refund: (o.financial_status ?? '').toLowerCase() === 'refunded',
       purchase_time: journey?.(o)?.timeLabel ?? null,
       journey_note: journey?.(o)?.note ?? null,
       age: demo?.(o)?.age ?? null,
       gender: demo?.(o)?.gender ?? null,
+      creative: creativeOf?.(o) ?? null,
       campaign_group: groupOf?.(o) ?? null,
     };
   });
@@ -167,8 +243,32 @@ export function buildSalesReport(
       byProvince: sortBreakdown(byProvince),
       byPlan: sortBreakdown(byPlan),
       byDiscount: sortBreakdown(byDiscount),
+      bySource: sortBreakdown(bySource),
     },
   };
+}
+
+// The three buckets a sale is marked with in the report. A reseller marketplace
+// (Walmart / Best Buy via Mirakl, Shopify Collective) is named explicitly; every
+// other sale — our own storefront, the subscription-app checkout channels, and
+// older orders with no channel — is our Shopify website.
+export const SHOPIFY_WEBSITE = 'Shopify Website';
+
+/** The sales channel a sale came through, normalised to one of three buckets:
+ *  "Walmart", "Best Buy", or "Shopify Website" (plus "Shopify Collective" for
+ *  that reseller). orders.sales_channel carries the raw Shopify source_name the
+ *  sync resolved: the reseller marketplaces arrive as "Walmart" / "Best Buy",
+ *  while our own storefront arrives as "Our Website", as a subscription-app
+ *  checkout channel (e.g. "subscription_contract_checkout_one"), or blank on
+ *  older orders — all of which are sales through our Shopify site, so they map to
+ *  "Shopify Website". Matched by keyword so a new channel variant still lands in
+ *  the right bucket. */
+export function saleSourceOf(o: Order): string {
+  const lc = (o.sales_channel ?? '').trim().toLowerCase();
+  if (lc.includes('walmart')) return 'Walmart';
+  if (lc.includes('best buy') || lc.includes('bestbuy')) return 'Best Buy';
+  if (lc.includes('collective')) return 'Shopify Collective';
+  return SHOPIFY_WEBSITE;
 }
 
 // Marker for any cell we can't populate from current data (age/gender demographics,
@@ -179,8 +279,8 @@ export const UNKNOWN = 'UNKNOWN';
 // Manual tracker columns, prefixed with a Campaign column so the bucketing each
 // sale piled into is visible for verification.
 export const REPORT_COLUMNS = [
-  'Campaign', 'Name', 'Date', 'Time (EST)', 'City', 'Province/State', 'Country',
-  'Age Range', 'Gender', 'Source', 'Buyer Plan',
+  'Campaign', 'Name', 'Sale Source', 'Full Refund?', 'Date', 'Time (EST)', 'City', 'Province/State', 'Country',
+  'Age Range', 'Gender', 'Source', 'Buyer Plan', 'Order Value',
   'Discount WELCOMELILA?', 'Discount CHECKOUTFIVE?', 'Other Codes?', 'Other Code 2',
   'Purchase Time after Purchase Visit', 'Notes',
 ] as const;
@@ -277,11 +377,17 @@ export function reportCells(r: SalesRow): string[] {
   const secondary = firstReal && lastReal && firstReal !== lastReal
     ? (source === firstReal ? lastReal : firstReal)
     : null;
-  // Hand-tracked ad creative for this buyer, matched on name + purchase date.
-  const creative = manualCreative(r.name, date);
+  // Ad creative for this buyer: operator-tracked (manual sheets) wins; else the
+  // best-effort clean-day match from Meta's per-ad purchases; else none.
+  const creative = manualCreative(r.name, date) ?? r.creative;
   return [
     r.campaign_group ?? '—',
     r.name,
+    // Where the sale transacted: Shopify Website, or a reseller marketplace
+    // (Walmart / Best Buy / Shopify Collective).
+    r.sale_source,
+    // Full refund only (Shopify 'refunded'); a partial refund stays 'No'.
+    r.full_refund ? 'Yes' : 'No',
     date,
     time,
     r.city || UNKNOWN,
@@ -294,6 +400,7 @@ export function reportCells(r: SalesRow): string[] {
       : UNKNOWN),
     source,
     r.plan,
+    `$${Math.round(r.revenue).toLocaleString('en-US')} ${r.currency}`,
     yesNo(codes, 'WELCOMELILA'),
     yesNo(codes, 'CHECKOUTFIVE'),
     others[0] ?? 'No',

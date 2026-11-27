@@ -115,9 +115,15 @@ export type Unit = {
   defect_notes: string | null;
   // Uploaded electrical test report (.md) in the 'test-reports' storage bucket.
   electrical_failed_tests: string | null;  // comma-joined failed test names from the report
+  // China factory test report — mandatory for every unit.
   test_report_path: string | null;
   test_report_name: string | null;
   test_report_uploaded_at: string | null;
+  // Canada test report — optional, only some units are re-tested in Canada.
+  // Attached alongside the China report; never drives electrical_check.
+  canada_test_report_path?: string | null;
+  canada_test_report_name?: string | null;
+  canada_test_report_uploaded_at?: string | null;
   // ESP32 MAC from the uploaded test report (or typed in the QC modal),
   // normalised "xx:xx:xx:xx:xx:xx". Null until a report with a MAC line is
   // uploaded. Not unique at the DB level — see findMacDuplicates.

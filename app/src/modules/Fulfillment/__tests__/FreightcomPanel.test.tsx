@@ -8,10 +8,14 @@ const { confirmBookingMock } = vi.hoisted(() => ({
   confirmBookingMock: vi.fn(
     (queueId: string, input: {
       carrier: string; tracking_num: string; label_pdf?: File;
+      extra_packages?: { tracking_num: string; label_pdf?: File | null; label_pdf_path?: string | null }[];
       order: { id: string; order_ref: string }; serials: string[];
     }) => {
       void queueId; void input;
-      return Promise.resolve({ label_pdf_path: 'q-1/label-1.pdf' });
+      return Promise.resolve({
+        label_pdf_path: 'q-1/label-1.pdf',
+        extra_packages: null as { tracking_num: string; label_pdf_path: string }[] | null,
+      });
     },
   ),
 }));
@@ -196,5 +200,77 @@ describe('FreightcomPanel — booking a Freightcom shipment is the same four mov
     expect(panel).toHaveTextContent('LL01-00000000358');
     expect(panel).toHaveTextContent('LL01-00000000412');
     expect(panel).toHaveTextContent(/2 machines ship/i);
+  });
+});
+
+// Order #1341: three machines, three Freightcom labels. The row held one
+// tracking number and one label, so boxes 2 and 3 had nowhere to go.
+describe('FreightcomPanel — a booking with several boxes', () => {
+  beforeEach(() => confirmBookingMock.mockClear());
+
+  const three: FulfillmentQueueRow = {
+    ...row,
+    assigned_serial: 'LL01-1',
+    assigned_serials: ['LL01-1', 'LL01-2', 'LL01-3'],
+  };
+
+  it('nudges a multi-machine order to add a box per label, without forcing it', () => {
+    render(<FreightcomPanel row={three} order={order} />);
+    expect(screen.getByTestId('freightcom-box-nudge')).toHaveTextContent('3 machines, 1 label');
+    fireEvent.click(screen.getByTestId('freightcom-add-box'));
+    fireEvent.click(screen.getByTestId('freightcom-add-box'));
+    expect(screen.queryByTestId('freightcom-box-nudge')).toBeNull();
+    expect(screen.getByTestId('freightcom-box-3')).toHaveTextContent('Box 3 of 3');
+  });
+
+  it('needs a tracking number and label for every box, then saves them all', async () => {
+    render(<FreightcomPanel row={three} order={order} />);
+    fireEvent.change(screen.getByTestId('freightcom-carrier'), { target: { value: 'UPS' } });
+    fireEvent.click(screen.getByTestId('freightcom-add-box'));
+    fireEvent.click(screen.getByTestId('freightcom-add-box'));
+
+    fireEvent.change(screen.getByTestId('freightcom-tracking'), { target: { value: '1ZAAA' } });
+    fireEvent.change(screen.getByTestId('freightcom-label-pdf'), { target: { files: [pdfFile()] } });
+    fireEvent.change(screen.getByTestId('freightcom-tracking-2'), { target: { value: '1ZBBB' } });
+    fireEvent.change(screen.getByTestId('freightcom-label-pdf-2'), { target: { files: [pdfFile()] } });
+    fireEvent.change(screen.getByTestId('freightcom-tracking-3'), { target: { value: '1ZCCC' } });
+
+    // Box 3 has no label yet.
+    expect(screen.getByTestId('freightcom-confirm')).toBeDisabled();
+
+    fireEvent.change(screen.getByTestId('freightcom-label-pdf-3'), { target: { files: [pdfFile()] } });
+    expect(screen.getByTestId('freightcom-confirm')).toBeEnabled();
+    fireEvent.click(screen.getByTestId('freightcom-confirm'));
+
+    await waitFor(() => expect(confirmBookingMock).toHaveBeenCalledTimes(1));
+    const input = confirmBookingMock.mock.calls[0][1];
+    expect(input.tracking_num).toBe('1ZAAA');
+    expect(input.label_pdf).toBeInstanceOf(File);
+    expect(input.extra_packages?.map(p => p.tracking_num)).toEqual(['1ZBBB', '1ZCCC']);
+    expect(input.extra_packages?.every(p => p.label_pdf instanceof File)).toBe(true);
+  });
+
+  it('reloads saved boxes, and removing one drops it from the record', async () => {
+    const saved = {
+      ...three,
+      carrier: 'UPS', tracking_num: '1ZAAA', label_pdf_path: 'q-1/a.pdf',
+      extra_packages: [
+        { tracking_num: '1ZBBB', label_pdf_path: 'q-1/b.pdf' },
+        { tracking_num: '1ZCCC', label_pdf_path: 'q-1/c.pdf' },
+      ],
+    };
+    render(<FreightcomPanel row={saved} order={order} />);
+    expect(screen.getByTestId('freightcom-tracking-3')).toHaveValue('1ZCCC');
+    expect(screen.getByTestId('freightcom-confirmed')).toHaveTextContent('1ZAAA, 1ZBBB, 1ZCCC');
+
+    fireEvent.click(screen.getByTestId('freightcom-remove-box-2'));
+    fireEvent.click(screen.getByTestId('freightcom-confirm'));
+
+    await waitFor(() => expect(confirmBookingMock).toHaveBeenCalledTimes(1));
+    const input = confirmBookingMock.mock.calls[0][1];
+    expect(input.label_pdf).toBeUndefined();
+    expect(input.extra_packages).toEqual([
+      { tracking_num: '1ZCCC', label_pdf: null, label_pdf_path: 'q-1/c.pdf' },
+    ]);
   });
 });

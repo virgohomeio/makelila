@@ -136,6 +136,11 @@ export type ServiceTicket = {
    *  detail panel loads the report's photos by it. Optional: absent on rows
    *  read before the column landed. */
   lovely_report_id?: string | null;
+  /** Lovely project feedback.id for 'lovely_app' tickets made from the app's
+   *  feedback button. Optional for the same reason as lovely_report_id. */
+  lovely_feedback_id?: string | null;
+  /** Path of the feedback's screenshot in the Lovely feedback-photos bucket. */
+  lovely_feedback_photo_path?: string | null;
 };
 
 export type CustomerLifecycle = {
@@ -2078,4 +2083,26 @@ export async function setTelemetryAutoConfig(
   if (error) throw error;
   await logAction('telemetry_autoconfig_updated', 'telemetry_autoticket_config',
     `shadow_mode=${shadow_mode} enabled=${enabled}`);
+}
+
+/** Ticket panel "Message on Quo" — free-form SMS from the Quo line, logged
+ *  to this ticket's thread by the send-ticket-sms edge function. `phone` is
+ *  only needed when nothing is on file; the function saves it to the ticket. */
+export async function sendTicketSms(input: { ticket_id: string; message: string; phone?: string | null }): Promise<{
+  ok: boolean; to?: string; duplicate?: boolean; test_redirected?: boolean;
+}> {
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session) throw new Error('Not signed in');
+  const res = await fetch(`${SUPABASE_URL}/functions/v1/send-ticket-sms`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      apikey: SUPABASE_ANON_KEY,
+      Authorization: `Bearer ${session.access_token}`,
+    },
+    body: JSON.stringify(input),
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(body.error ?? `HTTP ${res.status}`);
+  return body;
 }

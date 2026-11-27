@@ -94,3 +94,24 @@ describe('renderShipmentEmail', () => {
     expect(out).toBe('Carrier: {{carrier}}');
   });
 });
+
+describe('shipmentEmailVars — a multi-box Freightcom booking (#1341)', () => {
+  it('gives the customer every box\'s tracking number and link', () => {
+    const v = shipmentEmailVars(
+      { ...row({ carrier: 'UPS', tracking_num: '1Z999' }), extra_packages: [{ tracking_num: '1ZB' }, { tracking_num: '1ZC' }] },
+      us,
+    );
+    expect(v.tracking_num).toBe('1Z999, 1ZB, 1ZC');
+    expect(v.tracking_url.split('\n')).toEqual([
+      'https://www.ups.com/track?tracknum=1Z999',
+      'https://www.ups.com/track?tracknum=1ZB',
+      'https://www.ups.com/track?tracknum=1ZC',
+    ]);
+  });
+
+  it('is unchanged for a single box', () => {
+    const v = shipmentEmailVars({ ...row({ carrier: 'UPS', tracking_num: '1Z999' }), extra_packages: [] }, us);
+    expect(v.tracking_num).toBe('1Z999');
+    expect(v.tracking_url).toBe('https://www.ups.com/track?tracknum=1Z999');
+  });
+});

@@ -175,3 +175,30 @@ describe('StepAssign — picking the machines an order is for', () => {
     expect(screen.getByText(/already shipped/)).toBeInTheDocument();
   });
 });
+
+describe('StepAssign — a unit already reserved for this order', () => {
+  // R-0073: the replacement reserved 421 when it was raised, so 421 was no
+  // longer 'ready' and the picker hid it, asking for a different machine.
+  const replacement = {
+    order_ref: 'R-0073',
+    line_items: [{ kind: 'unit', name: 'LILA (P100X)', qty: 1, unit_serial: 'LL01-00000000421' }],
+  };
+
+  it('lists and pre-picks it, and leaves units reserved for others hidden', async () => {
+    useUnitsMock.mockReturnValue({
+      units: [
+        ...READY,
+        unit('LL01-00000000421', { status: 'reserved', customer_order_ref: 'R-0073' }),
+        unit('LL01-00000000420', { status: 'reserved', customer_order_ref: 'R-0064' }),
+      ],
+      loading: false,
+    });
+    render(<StepAssign row={row} order={replacement} />);
+    expect(screen.getByText(/Reserved for this order/)).toBeInTheDocument();
+    expect(screen.queryByText(/00420/)).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.getByText(/1 of 1 picked/)).toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole('button', { name: /Confirm LL01-00000000421/ }));
+    await waitFor(() => expect(assignUnitsMock).toHaveBeenCalledWith('q-1', ['LL01-00000000421'], 'o-1'));
+  });
+});

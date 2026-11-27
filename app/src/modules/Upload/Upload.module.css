@@ -95,3 +95,36 @@
   border-radius: var(--radius-sm, 6px);
   font-size: 12px; color: #7b341e; word-break: break-word;
 }
+
+/* Shipping-invoice customer search */
+.custPicker { position: relative; max-width: 420px; margin-bottom: 12px; }
+.custSearch {
+  width: 100%; box-sizing: border-box; padding: 8px 10px; font-size: 13px;
+  border: 1px solid var(--color-border); border-radius: var(--radius-sm, 6px);
+  background: var(--color-raised); color: var(--color-ink);
+}
+.custDropdown {
+  position: absolute; top: 100%; left: 0; right: 0; z-index: 20; margin-top: 2px;
+  max-height: 320px; overflow-y: auto;
+  background: var(--color-raised); border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm, 6px); box-shadow: 0 6px 18px rgba(0, 0, 0, 0.12);
+}
+.custOption {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 2px; width: 100%;
+  padding: 8px 12px; font-size: 13px; text-align: left; color: var(--color-ink);
+  background: transparent; border: none; cursor: pointer;
+}
+.custOption span { font-size: 11px; }
+.custOptionActive { background: var(--color-surface); }
+.pickedCustomer {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  max-width: 560px; padding: 10px 12px; margin-bottom: 12px;
+  border: 1px solid var(--color-border); border-radius: var(--radius-sm, 6px);
+}
+.pickedCustomer > div { display: flex; flex-direction: column; gap: 2px; font-size: 13px; }
+.pickedCustomer span { font-size: 12px; }
+.changeBtn {
+  padding: 4px 10px; font-size: 12px; font-weight: 600; cursor: pointer;
+  background: transparent; color: var(--color-ink); border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm, 6px);
+}

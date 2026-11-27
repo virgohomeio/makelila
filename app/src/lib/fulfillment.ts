@@ -86,11 +86,26 @@ export type FulfillmentQueueRow = {
   starter_skipped_at?: string | null;
   starter_skipped_by?: string | null;
   starter_skip_reason?: string | null;
+  // "Starter soil ordered" checkbox (20261126120000).
+  starter_ordered_at?: string | null;
+  starter_ordered_by?: string | null;
   email_sent_at: string | null;
   email_sent_by: string | null;
+  // The automatic next-day onboarding-instructions email
+  // (20261105120000_onboarding_instructions_email.sql). Optional for the same
+  // apply-by-hand reason as the columns above.
+  onboarding_email_due_at?: string | null;
+  onboarding_email_sent_at?: string | null;
+  onboarding_email_error?: string | null;
 
   fulfilled_at: string | null;
   fulfilled_by: string | null;
+  // Whether the Shopify order was marked fulfilled too
+  // (20261117120000_fulfillment_queue_shopify_sync.sql). Written by the
+  // push-shopify-fulfillments edge function, which confirmDock calls. Optional
+  // for the same apply-by-hand reason as the columns above.
+  shopify_fulfilled_at?: string | null;
+  shopify_sync_error?: string | null;
 
   due_date: string | null;
   priority: boolean;
@@ -558,19 +573,31 @@ export async function assignUnits(queueId: string, serials: string[], orderId: s
   // one go so a bad pick is caught before anything is written.
   const { data: existing, error: rErr } = await supabase
     .from('units')
-    .select('serial, status')
+    .select('serial, status, customer_order_ref')
     .in('serial', picked);
   if (rErr) throw rErr;
   const statuses = new Map(
     (existing ?? []).map(u => [(u as { serial: string }).serial, (u as { status: string }).status]),
   );
+  const reservedFor = new Map(
+    (existing ?? []).map(u => [
+      (u as { serial: string }).serial,
+      (u as { customer_order_ref: string | null }).customer_order_ref,
+    ]),
+  );
   // Only 'ready' units are pickable; 'shipped' is allowed for the backfill
   // flow. Everything else — team-test, quarantine, scrap, lost, in-production,
   // etc. — is out of circulation and must not be reserved onto an order.
+  //
+  // The one exception is a unit already 'reserved' for THIS order: a
+  // replacement names its machine when it is raised (createReplacementOrder
+  // reserves it then), so by the time it reaches this step its unit is no
+  // longer 'ready' — and refusing it stranded R-0073's 421 off the picker.
   const PICKABLE: ReadonlyArray<string> = ['ready', 'shipped'];
   for (const serial of picked) {
     const status = statuses.get(serial);
-    if (!status || !PICKABLE.includes(status)) {
+    const ownReservation = status === 'reserved' && reservedFor.get(serial) === order.order_ref;
+    if (!status || (!PICKABLE.includes(status) && !ownReservation)) {
       throw new Error(
         `Unit ${serial} is '${status ?? 'unknown'}' and cannot be assigned to a fulfillment order.`,
       );
@@ -882,16 +909,31 @@ export async function goBackStep(queueId: string, currentStep: FulfillmentStep):
     update.assigned_serial = null;
   }
 
-  if (currentStep === 6) {
+  // Step order since 2026-11-05: 3 Label → 4 Email → 5 Pickup → 6 Fulfilled.
+  // Rewinding out of Pickup reopens the email, so the send can be retried
+  // (the edge function refuses a second send while email_sent_at is set), and
+  // withdraws a next-day onboarding email that has not gone yet.
+  if (currentStep === 5) {
     update.email_sent_at = null;
     update.email_sent_by = null;
+    update.onboarding_email_due_at = null;
+  }
+  if (currentStep === 6) {
     update.fulfilled_at = null;
     update.fulfilled_by = null;
+    update.dock_confirmed_at = null;
+    update.dock_confirmed_by = null;
   }
-  const { error } = await supabase
+  let { error } = await supabase
     .from('fulfillment_queue')
     .update(update)
     .eq('id', queueId);
+  // Migrations here are applied by hand; a database without the onboarding
+  // columns (20261105120000) has nothing scheduled to withdraw.
+  if (error && 'onboarding_email_due_at' in update && /onboarding_email_due_at/.test(error.message)) {
+    delete update.onboarding_email_due_at;
+    ({ error } = await supabase.from('fulfillment_queue').update(update).eq('id', queueId));
+  }
   if (error) throw error;
   await logAction('fq_step_back', queueId, `Step ${currentStep} → ${prev}`);
 }
@@ -914,19 +956,99 @@ export async function toggleDockCheck(
   if (error) throw error;
 }
 
-/** Step 4: all 4 checks confirmed → advance 4→5. */
+/** Step 5: pickup confirmed → the row is fulfilled (5→6).
+ *
+ *  Since 2026-11-05 the shipping email goes out first, at step 4, straight
+ *  after "Pickup scheduled"; confirming the carrier collected the box is what
+ *  closes the row, so this is now the write that takes it to step 6 (and so
+ *  fires the step-6 triggers: units shipped, warranty, Lovely serial link).
+ *  The dock_* booleans are all stamped true to keep the row consistent with a
+ *  completed handoff. */
 export async function confirmDock(queueId: string): Promise<void> {
   const userId = await currentUserId();
+  const { data: cur, error: rErr } = await supabase
+    .from('fulfillment_queue')
+    .select('email_sent_at, assigned_serial')
+    .eq('id', queueId)
+    .single();
+  if (rErr || !cur) throw new Error(`Read queue row: ${rErr?.message ?? 'not found'}`);
+  if (!cur.email_sent_at) throw new Error('Send the shipping email before confirming the pickup.');
+  const now = new Date().toISOString();
   const { error } = await supabase
     .from('fulfillment_queue')
     .update({
-      step: 5,
+      step: 6,
+      fulfilled_at: now,
+      fulfilled_by: userId,
+      dock_printed: true,
+      dock_affixed: true,
+      dock_docked: true,
+      dock_notified: true,
+      dock_picked_up: true,
       dock_confirmed_at: new Date().toISOString(),
       dock_confirmed_by: userId,
     })
     .eq('id', queueId);
   if (error) throw error;
-  await logAction('fq_dock_confirmed', queueId, 'Dock check complete');
+  // The unit has left: free its shelf slot. Best-effort — the
+  // sync_shelf_slot_on_unit_status_change trigger also does this when the
+  // step-6 trigger flips the unit to shipped.
+  if (cur.assigned_serial) {
+    const { error: shelfErr } = await supabase.from('shelf_slots')
+      .update({ status: 'empty', updated_at: now })
+      .eq('serial', cur.assigned_serial as string);
+    if (shelfErr) console.warn('shelf slot release failed (non-fatal):', shelfErr.message);
+  }
+  await logAction('fq_dock_confirmed', queueId, 'Pickup confirmed — fulfilled');
+  // Mark the Shopify order fulfilled too. Fire-and-forget: the box has left
+  // whatever Shopify says, so a Shopify outage or a missing token scope must
+  // never undo or block the pickup confirmation. The edge function records the
+  // outcome on the row, and the Fulfilled panel offers a retry on failure.
+  void pushShopifyFulfillment(queueId).catch(err =>
+    console.warn('Shopify fulfillment push failed (non-fatal):', (err as Error).message));
+}
+
+export type ShopifyPushOutcome =
+  | { status: 'pushed'; order_ref: string | null }
+  | { status: 'already_fulfilled'; order_ref: string | null }
+  | { status: 'skipped'; reason: string; order_ref: string | null }
+  | { status: 'failed'; error: string; order_ref: string | null };
+
+/** Marks this queue row's Shopify order as fulfilled, with the row's tracking
+ *  number and carrier. Called automatically from confirmDock and by the retry
+ *  button on the Fulfilled panel. Replacements are skipped server-side — they
+ *  are makeLILA-only orders. Direct fetch for the same reason as
+ *  sendFulfillmentEmail: functions.invoke hides the error body on non-2xx. */
+export async function pushShopifyFulfillment(queueId: string): Promise<ShopifyPushOutcome> {
+  const { data: { session } } = await supabase.auth.getSession();
+  const res = await fetch(`${SUPABASE_URL}/functions/v1/push-shopify-fulfillments`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      apikey: SUPABASE_ANON_KEY,
+      Authorization: `Bearer ${session?.access_token ?? SUPABASE_ANON_KEY}`,
+    },
+    body: JSON.stringify({ queue_id: queueId }),
+  });
+  const bodyText = await res.text();
+  let parsed: (Partial<ShopifyPushOutcome> & { error?: string; reason?: string }) | null = null;
+  try { parsed = JSON.parse(bodyText); } catch { /* keep raw */ }
+  if (!res.ok) {
+    throw new Error(`Shopify sync failed (${res.status}): ${parsed?.error ?? bodyText}`);
+  }
+  if (!parsed?.status) throw new Error('Shopify sync: response was not understood');
+  const outcome = parsed as ShopifyPushOutcome;
+  const ref = outcome.order_ref ?? '';
+  if (outcome.status === 'pushed') {
+    await logAction('fq_shopify_fulfilled', queueId, `Marked ${ref} fulfilled in Shopify`);
+  } else if (outcome.status === 'already_fulfilled') {
+    await logAction('fq_shopify_fulfilled', queueId, `${ref} was already fulfilled in Shopify`);
+  } else if (outcome.status === 'failed') {
+    await logAction('fq_shopify_sync_failed', queueId, `Shopify sync failed for ${ref}: ${outcome.error}`);
+  } else if (!outcome.reason.startsWith('replacement')) {
+    await logAction('fq_shopify_sync_failed', queueId, `Shopify sync skipped for ${ref}: ${outcome.reason}`);
+  }
+  return outcome;
 }
 
 /** Step 5: a late correction to the starter tracking number. Step 3 is where
@@ -967,9 +1089,21 @@ export function trackingUrlFor(carrier: string | null, tracking: string | null):
 /** The {{variables}} the 'shipment_confirmation' template is rendered against.
  *  Built here so the Step-5 preview and the edge function agree on every value. */
 export function shipmentEmailVars(
-  row: Pick<FulfillmentQueueRow, 'carrier' | 'tracking_num' | 'starter_tracking_num'>,
+  row: Pick<FulfillmentQueueRow, 'carrier' | 'tracking_num' | 'starter_tracking_num'> & {
+    /** Boxes 2..N of a multi-box Freightcom booking (lib/freightcomBooking.ts). */
+    extra_packages?: { tracking_num: string }[] | null;
+  },
   order: { customer_name: string; order_ref: string; country: 'US' | 'CA' },
 ): Record<string, string> {
+  // A multi-box booking has a tracking number per box; the customer gets all
+  // of them, and a link for each (deduped — a carrier with no prefillable URL
+  // gives the same search page for every box).
+  const numbers = [row.tracking_num, ...(row.extra_packages ?? []).map(p => p.tracking_num)]
+    .map(n => n?.trim())
+    .filter((n): n is string => !!n);
+  const urls = numbers.length > 1
+    ? [...new Set(numbers.map(n => trackingUrlFor(row.carrier, n)))]
+    : [trackingUrlFor(row.carrier, row.tracking_num)];
   // The compost starter ships separately through Amazon. Keyed on the number
   // rather than on the destination: step 3 now asks for one on every machine
   // sale, CA included (lib/starterKit.ts), and gating the block on country
@@ -985,8 +1119,8 @@ export function shipmentEmailVars(
     customer_first_name: order.customer_name.split(' ')[0] ?? order.customer_name,
     order_ref: order.order_ref,
     carrier: row.carrier ?? '',
-    tracking_num: row.tracking_num ?? '',
-    tracking_url: trackingUrlFor(row.carrier, row.tracking_num),
+    tracking_num: numbers.length > 1 ? numbers.join(', ') : (row.tracking_num ?? ''),
+    tracking_url: urls.join('\n'),
     starter_block: starterBlock,
   };
 }
@@ -1005,7 +1139,15 @@ export function renderShipmentEmail(template: string, vars: Record<string, strin
   return renderTemplate(withBlock, vars);
 }
 
-/** Sends the Step-5 shipment confirmation.
+export type SendFulfillmentEmailResult = {
+  email_id: string;
+  step?: number;
+  /** The Quo text sent with it; null when none was asked for. */
+  sms?: { ok: true; to: string } | { ok: false; error: string } | null;
+  onboarding_email_due_at?: string | null;
+};
+
+/** Sends the Step-4 shipping email (and its Quo text).
  *
  *  `content` is the rendered subject/body exactly as the operator sees it in
  *  the queue — the edge function keeps no copy of the wording, so this is what
@@ -1013,8 +1155,8 @@ export function renderShipmentEmail(template: string, vars: Record<string, strin
  *  row. Omitting `content` falls back to the stored template server-side. */
 export async function sendFulfillmentEmail(
   queueId: string,
-  content?: { subject: string; body: string; edited: boolean },
-): Promise<{ email_id: string }> {
+  content?: { subject: string; body: string; edited: boolean; sms?: string },
+): Promise<SendFulfillmentEmailResult> {
   await currentUserId();
   const { data: { session } } = await supabase.auth.getSession();
   const res = await fetch(`${SUPABASE_URL}/functions/v1/send-fulfillment-email`, {
@@ -1029,6 +1171,7 @@ export async function sendFulfillmentEmail(
       subject: content?.subject,
       body: content?.body,
       edited: content?.edited ?? false,
+      sms: content?.sms,
     }),
   });
   const bodyText = await res.text();
@@ -1040,7 +1183,7 @@ export async function sendFulfillmentEmail(
     } catch { /* keep raw */ }
     throw new Error(`Send email failed (${res.status}): ${detail}`);
   }
-  try { return JSON.parse(bodyText) as { email_id: string }; }
+  try { return JSON.parse(bodyText) as SendFulfillmentEmailResult; }
   catch { throw new Error('Send email: response was not JSON'); }
 }
 

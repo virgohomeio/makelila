@@ -100,6 +100,10 @@ export type PickupQueueRow = {
   eztrans_batch_sent_at?: string | null;
   /** When this queue row was created — what dates a log send against it. */
   created_at?: string | null;
+  /** The customer's shipping email. Since 2026-11-05 it is sent at step 4,
+   *  right after "Pickup scheduled", and the card stays under Ready to ship
+   *  until it has gone. */
+  email_sent_at?: string | null;
 };
 
 /** Has the 3PL been told about this row's carton, and when? Null if not.
@@ -180,6 +184,10 @@ export function isAwaitingPickup(
   // operator's rule names the label explicitly, so it is checked rather than
   // assumed. A carton with no tracking number is not waiting on anyone.
   if (!row.label_confirmed_at) return false;
+  // The shipping email is sent from Ready to ship (step 4, straight after
+  // "Pickup scheduled"); only once it has gone is the row waiting on the
+  // carrier alone.
+  if (!row.email_sent_at) return false;
   if (!isEzTrans(row)) return true;
   return goorooshipSend(row, sends) !== null;
 }
@@ -219,9 +227,8 @@ export function pickupBadgeTitle(send: GoorooshipSend, step: number = PICKUP_STE
   const how = send.via === 'batch'
     ? `Sent to Goorooship in the day batch on ${when}.`
     : `Sent to Goorooship as its own booking email on ${when}.`;
-  const waiting = step > PICKUP_STEP
-    ? 'Collected — the shipment-confirmation email to the customer is still to send.'
-    : 'Waiting on the carrier to collect.';
+  void step;
+  const waiting = 'Shipping email sent — waiting on the carrier to collect.';
   return `${how} ${waiting}`;
 }
 

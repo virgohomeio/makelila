@@ -86,10 +86,16 @@ export function useLovelyTickets() {
   return { tickets, loading, error, refetch };
 }
 
-// Returns { [path]: signedUrl } for the given damage-photos object paths via
-// the lovely-damage-photos edge function. Throws with the function's error body
-// on a non-2xx (including 404 when the function isn't deployed yet).
-export async function signDamagePhotos(paths: string[]): Promise<Record<string, string>> {
+export type LovelyPhotoBucket = 'damage-photos' | 'feedback-photos';
+
+// Returns { [path]: signedUrl } for the given object paths in one of the Lovely
+// project's private photo buckets, via the lovely-damage-photos edge function.
+// Throws with the function's error body on a non-2xx (including 404 when the
+// function isn't deployed yet).
+export async function signDamagePhotos(
+  paths: string[],
+  bucket: LovelyPhotoBucket = 'damage-photos',
+): Promise<Record<string, string>> {
   if (paths.length === 0) return {};
   if (!isTelemetryConfigured || !TELEMETRY_URL || !TELEMETRY_ANON_KEY) {
     throw new Error('Lovely telemetry not configured.');
@@ -104,7 +110,7 @@ export async function signDamagePhotos(paths: string[]): Promise<Record<string, 
       apikey: TELEMETRY_ANON_KEY,
       Authorization: `Bearer ${token}`,
     },
-    body: JSON.stringify({ paths }),
+    body: JSON.stringify({ paths, bucket }),
   });
   const text = await res.text();
   if (!res.ok) {
@@ -179,4 +185,36 @@ export function useLovelyReportPhotos(reportId: string | null): {
   }, [reportId]);
 
   return { paths, urls, loading, error };
+}
+
+// The screenshot on a ticket made from the Lovely app's feedback button. The
+// sync copies its path onto the ticket (the feedback table isn't anon-readable),
+// so only the signing round trip happens here.
+export function useLovelyFeedbackPhoto(path: string | null): {
+  url: string | null;
+  loading: boolean;
+  error: string | null;
+} {
+  const [url, setUrl] = useState<string | null>(null);
+  const [loading, setLoading] = useState<boolean>(!!path);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setUrl(null);
+    setError(null);
+    if (!path) { setLoading(false); return; }
+    let cancelled = false;
+    setLoading(true);
+    signDamagePhotos([path], 'feedback-photos')
+      .then(signed => {
+        if (cancelled) return;
+        if (signed[path]) setUrl(signed[path]);
+        else setError('The photo is no longer in storage.');
+      })
+      .catch(e => { if (!cancelled) setError((e as Error).message); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [path]);
+
+  return { url, loading, error };
 }

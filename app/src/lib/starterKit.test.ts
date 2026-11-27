@@ -78,7 +78,7 @@ describe('starterBlocker — what step 3 is still waiting on', () => {
   });
 
   it('names the soil rather than the field — the operator has shopping to do', () => {
-    expect(STARTER_BLOCKER).toMatch(/compost starter/i);
+    expect(STARTER_BLOCKER).toMatch(/starter soil/i);
     expect(STARTER_BLOCKER).toMatch(/Amazon/);
   });
 });
@@ -120,5 +120,11 @@ describe('isMissingStarterSkipColumn — a deploy that landed before the DDL', (
     expect(isMissingStarterSkipColumn(new Error('network error'))).toBe(false);
     expect(isMissingStarterSkipColumn({ code: '23514' })).toBe(false);
     expect(isMissingStarterSkipColumn(null)).toBe(false);
+  });
+});
+
+describe('the "Starter soil ordered" checkbox', () => {
+  it('settles the starter on its own, with no tracking number', () => {
+    expect(starterSettled({ starter_tracking_num: null, starter_ordered_at: '2026-11-26T12:00:00Z' })).toBe(true);
   });
 });

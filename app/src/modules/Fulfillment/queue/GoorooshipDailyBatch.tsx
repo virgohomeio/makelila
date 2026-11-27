@@ -3,6 +3,8 @@ import {
   sendEzTransDailyBatch,
   useDailyBatch,
   previewOrdersBlock,
+  unconfirmEzTransOrder,
+  EZTRANS_BATCH_CONFIRMED_ACTION,
   EZTRANS_BATCH_SENT_ACTION,
   type EzTransBatchItem,
   type EzTransBatchOrder,
@@ -39,6 +41,28 @@ export function GoorooshipDailyBatch({
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<EzTransBatchSendResult | null>(null);
   const [showPreview, setShowPreview] = useState(false);
+  const [removing, setRemoving] = useState<string | null>(null);
+
+  /** Take one order back out of today's email. The booking (carrier, tracking,
+   *  label) stays on the row — it simply does not go out in this batch. */
+  const handleRemove = async (item: EzTransBatchItem) => {
+    setRemoving(item.queueId); setError(null);
+    try {
+      await unconfirmEzTransOrder(item.queueId);
+      await logAction(
+        EZTRANS_BATCH_CONFIRMED_ACTION,
+        item.orderRef,
+        `Removed from the Goorooship day batch — ${item.carrier} ${item.tracking}. ` +
+        `The booking stands; it is simply not in today's email.`,
+        { entityType: 'order', entityId: item.orderId },
+      );
+      onSent?.();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setRemoving(null);
+    }
+  };
 
   const handleSend = async () => {
     if (pending.length === 0) return;
@@ -78,7 +102,7 @@ export function GoorooshipDailyBatch({
   return (
     <section className={styles.batchFooter} aria-label="Today's Goorooship batch">
       <div className={styles.batchFooterHead}>
-        <span className={styles.batchTitle}>Today's Goorooship batch — {day}</span>
+        <span className={styles.batchTitle}>Today's EZ Trans email — {day}</span>
         <span className={styles.batchCount}>
           {pending.length} waiting
           {sent.length > 0 ? ` · ${sent.length} already sent today` : ''}
@@ -93,14 +117,16 @@ export function GoorooshipDailyBatch({
       </div>
 
       {pending.length === 0 && sent.length === 0 ? (
-        <p className={styles.batchEmpty}>
-          Nothing is confirmed for EZ Trans today. Confirm an order's carrier,
-          tracking number and packing list in step 3 and it will queue up here.
-        </p>
+        <p className={styles.batchEmpty}>No orders yet. Confirm one in step 3 to add it.</p>
       ) : (
         <ul className={styles.batchList}>
           {[...pending, ...sent].map(item => (
-            <BatchRow key={item.queueId} item={item} />
+            <BatchRow
+              key={item.queueId}
+              item={item}
+              onRemove={item.sentAt ? undefined : () => { void handleRemove(item); }}
+              removing={removing === item.queueId}
+            />
           ))}
         </ul>
       )}
@@ -119,15 +145,9 @@ export function GoorooshipDailyBatch({
         >
           {busy
             ? 'Sending…'
-            : `✉ Email Today's Fulfilled Orders to Goorooship${pending.length ? ` (${pending.length})` : ''}`}
+            : `✉ Send to EZ Trans${pending.length ? ` (${pending.length})` : ''}`}
         </button>
-        <span className={styles.bookingHint}>
-          One email to {EZTRANS_EMAIL} carrying every order confirmed today. Each order's
-          shipping label and packing list go as one PDF; a US shipment's pesticide
-          worksheet goes as a second file, both named for the customer and the tracking number.
-          The email tells them the worksheet is a customs document to upload for the broker,
-          not paperwork for the carton.
-        </span>
+        <span className={styles.bookingHint}>One email to {EZTRANS_EMAIL} with every order above.</span>
       </div>
 
       {result && (
@@ -157,7 +177,9 @@ export function GoorooshipDailyBatch({
   );
 }
 
-function BatchRow({ item }: { item: EzTransBatchItem }) {
+function BatchRow({
+  item, onRemove, removing = false,
+}: { item: EzTransBatchItem; onRemove?: () => void; removing?: boolean }) {
   return (
     <li className={item.sentAt ? `${styles.batchItem} ${styles.batchItemSent}` : styles.batchItem}>
       <div className={styles.batchItemMain}>
@@ -169,6 +191,16 @@ function BatchRow({ item }: { item: EzTransBatchItem }) {
         {item.packingListEdited && <span className={styles.batchTag}>packing list edited</span>}
         {item.sentAt && (
           <span className={styles.batchTag}>sent {new Date(item.sentAt).toLocaleTimeString()}</span>
+        )}
+        {onRemove && (
+          <button
+            type="button"
+            className={styles.bookingPreviewToggle}
+            onClick={onRemove}
+            disabled={removing}
+            data-testid="batch-remove"
+            title="Take this order out of today's email — the booking stays"
+          >{removing ? 'Removing…' : 'Remove'}</button>
         )}
       </div>
       <div className={styles.batchDocs}>{item.documents.join(' · ')}</div>

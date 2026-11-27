@@ -5,18 +5,29 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-const { insertMock, invoicesForEmailMock, state } = vi.hoisted(() => {
-  const state: { inserted: any } = { inserted: null };
+const { insertMock, updateMock, invoicesForEmailMock, state } = vi.hoisted(() => {
+  const state: { inserted: any; updates: { table: string; patch: any }[]; calls: string[] } = { inserted: null, updates: [], calls: [] };
   const insertMock = vi.fn((row: any) => {
     state.inserted = row;
+    state.calls.push('insert');
     return { select: () => ({ single: () => Promise.resolve({ data: { id: 'ref-1' }, error: null }) }) };
   });
-  return { insertMock, invoicesForEmailMock: vi.fn(), state };
+  const updateMock = vi.fn((table: string, patch: any) => {
+    state.updates.push({ table, patch });
+    state.calls.push(`update:${table}`);
+    return { eq: () => Promise.resolve({ error: null }) };
+  });
+  return { insertMock, updateMock, invoicesForEmailMock: vi.fn(), state };
 });
 
 vi.mock('./supabase', () => ({
   supabase: {
-    from: () => ({ insert: insertMock }),
+    from: (table: string) => ({
+      insert: insertMock,
+      update: (patch: any) => updateMock(table, patch),
+      // updateReturnStatus probes received_at before stamping it
+      select: () => ({ eq: () => ({ maybeSingle: () => Promise.resolve({ data: null, error: null }) }) }),
+    }),
     auth: {
       getSession: () => Promise.resolve({ data: { session: { user: { id: 'u-1' } } } }),
       getUser: () => Promise.resolve({ data: { user: { id: 'u-1' } } }),
@@ -89,5 +100,35 @@ describe('opening refund amount', () => {
     } as Partial<ReturnRow>));
     expect(invoicesForEmailMock).toHaveBeenCalledWith('buyer@example.com');
     expect(state.inserted.customer_name).toBe('Sarah Lockhart');
+  });
+});
+
+// "Discard → Completeness" compiles a case straight from the intake column
+// (status created/pickup_scheduled/picked_up) when the customer is throwing a
+// defective unit away. It used to leave the return at 'created', so every later
+// gate (Manager Review, Finance) rejected the card and it sat in Manager Review
+// no matter how often George clicked Confirm (Janey Hsiao, 2026-11-06).
+describe('compiling a discard case', () => {
+  beforeEach(() => {
+    state.inserted = null; state.updates = []; state.calls = [];
+    insertMock.mockClear(); updateMock.mockClear();
+    invoicesForEmailMock.mockReset(); invoicesForEmailMock.mockResolvedValue([]);
+  });
+
+  it('marks an intake-stage discard return as discarded before opening the card', async () => {
+    await compileReturnToRefund(ret({ status: 'created', disposition: 'discard' } as Partial<ReturnRow>));
+    const retUpdate = state.updates.find(u => u.table === 'returns');
+    expect(retUpdate?.patch.status).toBe('discarded');
+    expect(state.calls.indexOf('update:returns')).toBeLessThan(state.calls.indexOf('insert'));
+  });
+
+  it('leaves an already-received return alone', async () => {
+    await compileReturnToRefund(ret({ status: 'received', disposition: 'discard' } as Partial<ReturnRow>));
+    expect(state.updates.filter(u => u.table === 'returns')).toEqual([]);
+  });
+
+  it('does not touch a ship-back return', async () => {
+    await compileReturnToRefund(ret({ status: 'received', disposition: 'ship_back' } as Partial<ReturnRow>));
+    expect(state.updates.filter(u => u.table === 'returns')).toEqual([]);
   });
 });

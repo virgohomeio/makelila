@@ -13,6 +13,9 @@ vi.mock('../../../lib/templates', async () => {
   };
 });
 
+const { pushMock } = vi.hoisted(() => ({ pushMock: vi.fn() }));
+vi.mock('../../../lib/fulfillment', () => ({ pushShopifyFulfillment: pushMock }));
+
 import { StepFulfilled } from '../queue/StepFulfilled';
 import type { FulfillmentQueueRow } from '../../../lib/fulfillment';
 
@@ -91,5 +94,34 @@ describe('StepFulfilled — proof the shipment email went out', () => {
     sentState.current = { ...message, status: 'failed', error: 'Resend 502: upstream' };
     render(<StepFulfilled row={row} order={order} />);
     expect(screen.getByText(/Resend 502: upstream/)).toBeInTheDocument();
+  });
+});
+
+describe('StepFulfilled — Shopify sync status', () => {
+  beforeEach(() => { sentState.current = { ...message }; pushMock.mockReset(); });
+
+  it('Shows when the Shopify order was marked fulfilled', () => {
+    render(<StepFulfilled row={{ ...row, shopify_fulfilled_at: '2026-11-17T15:00:00Z' }} order={order} />);
+    expect(screen.getByText(/Marked fulfilled in Shopify/)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /retry/i })).not.toBeInTheDocument();
+  });
+
+  it('Shows the error and retries the push', async () => {
+    pushMock.mockResolvedValue({ status: 'pushed', order_ref: '#1184' });
+    render(<StepFulfilled row={{ ...row, shopify_sync_error: 'Shopify fulfillment POST 403' }} order={order} />);
+    expect(screen.getByText(/Shopify fulfillment POST 403/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /retry/i }));
+    await waitFor(() => expect(screen.getByText(/Marked fulfilled in Shopify/)).toBeInTheDocument());
+    expect(pushMock).toHaveBeenCalledWith(row.id);
+  });
+
+  it('Offers a manual push on rows fulfilled before the auto-sync', () => {
+    render(<StepFulfilled row={row} order={order} />);
+    expect(screen.getByRole('button', { name: /mark fulfilled in shopify/i })).toBeInTheDocument();
+  });
+
+  it('Says nothing about Shopify on a replacement', () => {
+    render(<StepFulfilled row={row} order={{ ...order, kind: 'replacement' }} />);
+    expect(screen.queryByText('Shopify')).not.toBeInTheDocument();
   });
 });

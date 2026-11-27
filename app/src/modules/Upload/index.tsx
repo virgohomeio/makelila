@@ -1,11 +1,12 @@
-import { useMemo, useRef, useState } from 'react';
+import { useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import {
   bulkUploadAndMatch, useReviewQueueInvoices, assignInvoice, openInvoiceInNewTab, deleteInvoice,
   reextractInvoiceAmounts,
   type BulkUploadResult, type CustomerInvoice, type InvoiceDocType, type InvoiceMatchStatus,
 } from '../../lib/invoices';
-import { useCustomers } from '../../lib/customers';
+import { useCustomers, matchCustomerSearch, type Customer } from '../../lib/customers';
 import { useOrders } from '../../lib/orders';
+import { CustomerShippingInvoices } from '../../components/ShippingInvoices';
 import styles from './Upload.module.css';
 
 // What can be uploaded. Extensible — add a kind here and (if it's not an
@@ -35,6 +36,11 @@ const UPLOAD_KINDS: UploadKind[] = [
     documentType: 'refund_receipt',
   },
 ];
+
+// Shipping invoices are filed by hand against one customer (carrier bills
+// don't carry a Shopify order # the matcher could key on), so this kind
+// renders its own form instead of the bulk matcher.
+const SHIPPING_KIND_KEY = 'shipping_invoice';
 
 export default function Upload() {
   const [kindKey, setKindKey] = useState(UPLOAD_KINDS[0].key);
@@ -103,8 +109,17 @@ export default function Upload() {
             {k.label}
           </button>
         ))}
+        <button
+          className={`${styles.kindChip} ${kindKey === SHIPPING_KIND_KEY ? styles.kindChipActive : ''}`}
+          onClick={() => { setKindKey(SHIPPING_KIND_KEY); setResults(null); }}
+        >
+          Shipping invoices
+        </button>
       </div>
 
+      {kindKey === SHIPPING_KIND_KEY ? (
+        <ShippingUpload customers={customers} />
+      ) : (<>
       <div className={styles.dropCard}>
         <div className={styles.kindDesc}>{kind.description}</div>
         <input
@@ -178,6 +193,101 @@ export default function Upload() {
         customerName={customerName}
         onAssigned={reloadQueue}
       />
+      </>)}
+    </div>
+  );
+}
+
+// Pick a customer, then file their shipping / customs invoices. The same
+// list + form appears on the customer's profile and in Profitability.
+// A real search dropdown, not a <datalist>: the native one only matched on the
+// start of "Name (email)", mixed in the browser's autofill history, and rendered
+// unreadably in Safari/Chrome.
+function ShippingUpload({ customers }: { customers: Customer[] }) {
+  const [text, setText] = useState('');
+  const [picked, setPicked] = useState<Customer | null>(null);
+  const [open, setOpen] = useState(false);
+  const [active, setActive] = useState(0);
+
+  const matches = useMemo(() => {
+    const q = text.trim();
+    if (!q) return [];
+    return customers
+      .filter(c => (c.full_name || c.email) && matchCustomerSearch(c, [], q).matched)
+      .sort((a, b) => (a.full_name || a.email || '').localeCompare(b.full_name || b.email || ''))
+      .slice(0, 12);
+  }, [customers, text]);
+
+  const choose = (c: Customer) => { setPicked(c); setText(''); setOpen(false); };
+
+  const onKey = (e: KeyboardEvent<HTMLInputElement>) => {
+    if (!matches.length) return;
+    if (e.key === 'ArrowDown') { e.preventDefault(); setOpen(true); setActive(i => Math.min(i + 1, matches.length - 1)); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); setActive(i => Math.max(i - 1, 0)); }
+    else if (e.key === 'Enter') { e.preventDefault(); choose(matches[active] ?? matches[0]); }
+    else if (e.key === 'Escape') setOpen(false);
+  };
+
+  return (
+    <div className={styles.dropCard}>
+      <div className={styles.kindDesc}>
+        Carrier, freight and customs/duty invoices (UPS, Freightcom, Goorooship…), filed against one customer.
+        Freight we paid adds to the customer's shipping cost; customs we cover for them (US duty bills) goes to
+        their Customs &amp; duties cost on Customers › Profitability.
+      </div>
+      {picked ? (
+        <div className={styles.pickedCustomer}>
+          <div>
+            <strong>{picked.full_name || picked.email}</strong>
+            <span className={styles.muted}>
+              {[picked.email, picked.phone, picked.city].filter(Boolean).join(' · ')}
+            </span>
+          </div>
+          <button type="button" className={styles.changeBtn} onClick={() => setPicked(null)}>Change customer</button>
+        </div>
+      ) : (
+        <div className={styles.custPicker}>
+          <input
+            className={styles.custSearch}
+            type="search"
+            autoComplete="off"
+            value={text}
+            onChange={e => { setText(e.target.value); setOpen(true); setActive(0); }}
+            onFocus={() => setOpen(true)}
+            onBlur={() => setTimeout(() => setOpen(false), 150)}
+            onKeyDown={onKey}
+            placeholder="Search customer by name, email or phone…"
+          />
+          {open && matches.length > 0 && (
+            <div className={styles.custDropdown} role="listbox">
+              {matches.map((c, i) => (
+                <button
+                  key={c.id}
+                  type="button"
+                  role="option"
+                  aria-selected={i === active}
+                  className={`${styles.custOption} ${i === active ? styles.custOptionActive : ''}`}
+                  onMouseDown={e => e.preventDefault()}
+                  onMouseEnter={() => setActive(i)}
+                  onClick={() => choose(c)}
+                >
+                  <strong>{c.full_name || c.email}</strong>
+                  <span className={styles.muted}>{[c.email, c.phone, c.city].filter(Boolean).join(' · ') || '—'}</span>
+                </button>
+              ))}
+            </div>
+          )}
+          {text.trim() && matches.length === 0 && (
+            <div className={styles.muted}>No customer matches “{text.trim()}”.</div>
+          )}
+        </div>
+      )}
+      {picked && (
+        <>
+          <div className={styles.pickedList}>Shipping invoices for <strong>{picked.full_name || picked.email}</strong></div>
+          <CustomerShippingInvoices key={picked.id} customerId={picked.id} />
+        </>
+      )}
     </div>
   );
 }

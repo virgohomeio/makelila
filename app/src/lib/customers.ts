@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { RealtimeChannel } from '@supabase/supabase-js';
 import { supabase, SUPABASE_URL, SUPABASE_ANON_KEY } from './supabase';
 import { logAction } from './activityLog';
 import { DEFAULT_RATES, type ProfitabilityRates, type AcquisitionSpendRow } from './profitability';
 import { batchCensus, type UnitCensus } from './batchLandedCost';
+import { applyCostAdjustments, fetchCostAdjustmentInputs } from './shippingInvoices';
 import {
   ADDRESS_ORDER_COLUMNS, buildCustomerAddressIndex, resolveCustomerAddress,
   type AddressOrder,
@@ -682,24 +683,41 @@ export type CustomerProfitability = {
   // to it. Billed, but surfaced separately so the waste stays legible.
   diagnosis_noshow_count: number;
   is_team_member: boolean;
+  // Folded in client-side by applyCostAdjustments (lib/shippingInvoices.ts)
+  // from customer_shipping_invoices + customer_profitability_adjustments.
+  // Optional so fixtures built before them stay valid; absent reads as 0/null.
+  // Freight from uploaded shipping invoices marked counts_in_shipping.
+  uploaded_shipping_cad?: number;
+  shipping_invoice_count?: number;
+  // Operator override of the whole Shipping bucket; null = computed.
+  shipping_override_cad?: number | null;
+  // Bucket 12: customs/duty we covered for the customer (US DDU shipments).
+  customs_covered_cad?: number;
+  adjustment_note?: string | null;
 };
 
 export function useCustomerProfitability(): {
   rows: CustomerProfitability[];
   loading: boolean;
   error: Error | null;
+  reload: () => void;
 } {
   const [rows, setRows] = useState<CustomerProfitability[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<Error | null>(null);
+  const [version, setVersion] = useState(0);
+  const reload = useCallback(() => setVersion(v => v + 1), []);
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const { data, error: err } = await supabase
-        .from('customer_profitability')
-        .select('*')
-        .order('net_margin_cad', { ascending: false });
+      const [{ data, error: err }, adjustInputs] = await Promise.all([
+        supabase
+          .from('customer_profitability')
+          .select('*')
+          .order('net_margin_cad', { ascending: false }),
+        fetchCostAdjustmentInputs(),
+      ]);
       if (cancelled) return;
       if (err) {
         setError(err as unknown as Error);
@@ -751,13 +769,13 @@ export function useCustomerProfitability(): {
         shipping_costed_count:      Number(r.shipping_costed_count ?? 0),
         shipping_uncosted_count:    Number(r.shipping_uncosted_count ?? 0),
       })) as CustomerProfitability[];
-      setRows(coerced);
+      setRows(applyCostAdjustments(coerced, adjustInputs));
       setLoading(false);
     })();
     return () => { cancelled = true; };
-  }, []);
+  }, [version]);
 
-  return { rows, loading, error };
+  return { rows, loading, error, reload };
 }
 
 // ── Profitability inputs: rates and acquisition spend ───────────────────────
@@ -2030,4 +2048,105 @@ export function useUnitBatchLinks(): {
   }, []);
 
   return { links, futureBatches, census, batchFacts, loading, error };
+}
+
+// ── Primary user per machine ────────────────────────────────────────────────
+// customers.primary_user_* is ONE person per customer. A purchaser who bought
+// several machines for different people (one for themselves, others shipped to
+// family or colleagues) needs a primary user per serial. Those live in
+// unit_primary_users, keyed by serial; a row there overrides the customer-level
+// primary user for that machine.
+
+export type UnitPrimaryUser = {
+  unit_serial: string;
+  customer_id: string;
+  full_name: string;
+  phone: string | null;
+  email: string | null;
+  relationship: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+/** Per-machine primary users recorded for one customer, keyed by serial. Pass
+ *  null when no customer is selected — the hook then idles with an empty map. */
+export function useUnitPrimaryUsers(customerId: string | null): {
+  bySerial: Map<string, UnitPrimaryUser>;
+  loading: boolean;
+  refresh: () => Promise<void>;
+} {
+  const [rows, setRows] = useState<UnitPrimaryUser[]>([]);
+  const [loading, setLoading] = useState(customerId !== null);
+  const [refreshTick, setRefreshTick] = useState(0);
+
+  useEffect(() => {
+    if (!customerId) { setRows([]); setLoading(false); return; }
+    let channel: RealtimeChannel | null = null;
+    let cancelled = false;
+    setLoading(true);
+    (async () => {
+      const { data, error } = await supabase
+        .from('unit_primary_users')
+        .select('*')
+        .eq('customer_id', customerId);
+      if (cancelled) return;
+      if (!error && data) setRows(data as UnitPrimaryUser[]);
+      setLoading(false);
+
+      channel = supabase
+        .channel(`unit_primary_users:${customerId}`)
+        .on('postgres_changes', {
+          event: '*', schema: 'public', table: 'unit_primary_users',
+          filter: `customer_id=eq.${customerId}`,
+        }, (payload) => {
+          setRows(prev => {
+            if (payload.eventType === 'DELETE' && payload.old) {
+              return prev.filter(r => r.unit_serial !== (payload.old as { unit_serial: string }).unit_serial);
+            }
+            if (payload.new) {
+              const row = payload.new as UnitPrimaryUser;
+              return [...prev.filter(r => r.unit_serial !== row.unit_serial), row];
+            }
+            return prev;
+          });
+        })
+        .subscribe();
+    })();
+    return () => { cancelled = true; if (channel) void channel.unsubscribe(); };
+  }, [customerId, refreshTick]);
+
+  const refresh = async () => { setRefreshTick(t => t + 1); };
+  const bySerial = useMemo(() => new Map(rows.map(r => [r.unit_serial, r])), [rows]);
+  return { bySerial, loading, refresh };
+}
+
+/** Set (upsert) the primary user of one machine. A blank name clears it. */
+export async function setUnitPrimaryUser(
+  serial: string,
+  customerId: string,
+  input: AdditionalUserInput,
+): Promise<void> {
+  const row = normalizeAdditionalUser(input);
+  if (!row.full_name) {
+    await clearUnitPrimaryUser(serial, customerId);
+    return;
+  }
+  const { error } = await supabase.from('unit_primary_users').upsert({
+    unit_serial: serial, customer_id: customerId, ...row,
+  }, { onConflict: 'unit_serial' });
+  if (error) throw error;
+  await logAction(
+    'unit_primary_user_set',
+    serial,
+    additionalUserLabel(row),
+    { entityType: 'customer', entityId: customerId, unitSerial: serial },
+  );
+}
+
+/** Remove the per-machine primary user; the machine falls back to the
+ *  customer-level primary user (or the purchaser). */
+export async function clearUnitPrimaryUser(serial: string, customerId: string): Promise<void> {
+  const { error } = await supabase.from('unit_primary_users').delete().eq('unit_serial', serial);
+  if (error) throw error;
+  await logAction('unit_primary_user_set', serial, 'cleared', { entityType: 'customer', entityId: customerId, unitSerial: serial });
 }

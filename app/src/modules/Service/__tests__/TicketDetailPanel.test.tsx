@@ -7,12 +7,15 @@ import type { ServiceTicket } from '../../../lib/service';
 const render = (ui: ReactElement) => rtlRender(<MemoryRouter>{ui}</MemoryRouter>);
 
 const setTicketStatusesMock = vi.fn(() => Promise.resolve());
+const sendTicketSmsMock = vi.fn((_input: { ticket_id: string; message: string; phone?: string | null }) =>
+  Promise.resolve({ ok: true, to: '+14165550123' }));
 
 vi.mock('../../../lib/service', async () => {
   const actual = await vi.importActual<typeof import('../../../lib/service')>('../../../lib/service');
   return {
     ...actual,
     setTicketStatuses: (...args: unknown[]) => setTicketStatusesMock(...(args as [])),
+    sendTicketSms: (input: { ticket_id: string; message: string; phone?: string | null }) => sendTicketSmsMock(input),
     useCustomerLifecycle: vi.fn(() => ({ row: null, loading: false })),
     useTicketMessages: vi.fn(() => ({ messages: [], loading: false })),
     useClassificationLog: vi.fn(() => ({ entries: [], loading: false })),
@@ -452,5 +455,34 @@ describe('TicketDetailPanel — Lovely app tickets', () => {
     render(<TicketDetailPanel ticket={mkTicket()} onClose={() => {}} />);
     expect(screen.queryByText('Lovely app photos')).toBeNull();
     expect(screen.queryByTestId('lovely-photos')).toBeNull();
+  });
+});
+
+describe('TicketDetailPanel — Message on Quo', () => {
+  beforeEach(() => { sendTicketSmsMock.mockClear(); });
+
+  it('sends a typed number when the ticket has no phone on file', async () => {
+    render(<TicketDetailPanel ticket={mkTicket({ customer_name: 'Ken' })} onClose={() => {}} />);
+    fireEvent.click(screen.getByText('Message on Quo'));
+    expect(screen.getByText(/No phone on file/i)).toBeTruthy();
+    const send = screen.getByRole('button', { name: 'Send SMS' }) as HTMLButtonElement;
+    expect(send.disabled).toBe(true);
+    fireEvent.change(screen.getByLabelText('Phone number'), { target: { value: '416 555 0123' } });
+    fireEvent.change(screen.getByLabelText('Message'), { target: { value: 'Hi Ken — following up.' } });
+    fireEvent.click(send);
+    await waitFor(() => expect(sendTicketSmsMock).toHaveBeenCalledTimes(1));
+    expect(sendTicketSmsMock.mock.calls[0][0]).toEqual({
+      ticket_id: 't1', message: 'Hi Ken — following up.', phone: '416 555 0123',
+    });
+    expect(await screen.findByText(/Sent to \+14165550123/)).toBeTruthy();
+  });
+
+  it('uses the number on file without overriding it', async () => {
+    render(<TicketDetailPanel ticket={mkTicket({ customer_phone: '+14165550100' })} onClose={() => {}} />);
+    fireEvent.click(screen.getByText('Message on Quo'));
+    expect((screen.getByLabelText('Phone number') as HTMLInputElement).value).toBe('+14165550100');
+    fireEvent.click(screen.getByRole('button', { name: 'Send SMS' }));
+    await waitFor(() => expect(sendTicketSmsMock).toHaveBeenCalledTimes(1));
+    expect(sendTicketSmsMock.mock.calls[0][0].phone).toBeNull();
   });
 });

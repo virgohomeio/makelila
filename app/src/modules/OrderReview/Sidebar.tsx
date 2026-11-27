@@ -7,10 +7,10 @@ import { useOrderCommAssessments } from '../../lib/orderComms';
 import { EmptyState } from '../../components/ui';
 import styles from './OrderReview.module.css';
 
-type Tab = 'pending' | 'held' | 'flagged' | 'approved' | 'all' | 'cancelled';
+type Tab = 'pending' | 'attention' | 'priority' | 'approved' | 'all' | 'cancelled';
 
 export function Sidebar({
-  pending, pendingBacklog, held, flagged, approved, all, cancelled,
+  pending, pendingBacklog, held, flagged, priority, approved, all, cancelled,
   selectedId,
   onSelect,
 }: {
@@ -19,8 +19,16 @@ export function Sidebar({
    *  in that tab but are still in All, so the rail says so rather than letting
    *  them disappear quietly. */
   pendingBacklog: Order[];
+  /** Held and Flagged are one tab now — "Needs Attention" — because both mean
+   *  the same thing to the operator working the rail: this order is parked and
+   *  waiting on a person, not moving through the queue. They stay distinct
+   *  statuses underneath (each row still says which), and are passed in
+   *  separately so the merge lives here and nowhere else. */
   held: Order[];
   flagged: Order[];
+  /** Walmart / Best Buy and hand-pinned orders — a cross-cut over the live
+   *  queue, not a status. See OrderBuckets.priority. */
+  priority: Order[];
   approved: Order[];
   all: Order[];
   /** Terminal — cancelled here or from the fulfillment queue. Already sorted
@@ -35,9 +43,14 @@ export function Sidebar({
   // cheap to compute and expensive to fetch.
   const { marks } = useRefundMarks();
 
+  // Flagged leads held in the merged tab's raw order, but every live tab is
+  // re-sorted by order ref below, so this only decides ties — the operator
+  // reads Needs Attention by ref like the other queues.
+  const attention = useMemo(() => [...flagged, ...held], [flagged, held]);
+
   const source = tab === 'pending'     ? pending
-               : tab === 'held'        ? held
-               : tab === 'flagged'     ? flagged
+               : tab === 'attention'   ? attention
+               : tab === 'priority'    ? priority
                : tab === 'approved'    ? approved
                : tab === 'cancelled'   ? cancelled
                : all;
@@ -62,13 +75,43 @@ export function Sidebar({
   // commConcern note on OrderRow.
   const { byOrderId: commAssessments } = useOrderCommAssessments();
 
+  const renderRow = (o: Order, i: number) => (
+    <OrderRow
+      key={o.id}
+      order={o}
+      // Drives the load stagger. Capped at 14 so a long queue's last row
+      // isn't held behind a quarter-second run-up it gains nothing from.
+      revealIndex={Math.min(i, 14)}
+      isSelected={o.id === selectedId}
+      onClick={() => onSelect(o.id)}
+      refundFlag={refundFlags.get(o.id) ?? null}
+      commConcern={
+        commAssessments[o.id]?.verdict === 'unclear'
+          ? commAssessments[o.id].headline
+          : null
+      }
+    />
+  );
+
+  // PRIORITY spans several statuses at once, so it reads as labeled sections
+  // rather than one flat list. Pending leads (these still need confirming — the
+  // actual work), Needs Attention next, and Confirmed trails because those are
+  // already in the ship queue and shown only so the operator can see the whole
+  // priority picture. Each section draws from `visible`, so it inherits the
+  // search filter and the by-ref sort.
+  const prioritySections = [
+    { key: 'pending',   label: 'Pending',         rows: visible.filter(o => o.status === 'pending') },
+    { key: 'attention', label: 'Needs Attention', rows: visible.filter(o => o.status === 'held' || o.status === 'flagged') },
+    { key: 'confirmed', label: 'Confirmed',       rows: visible.filter(o => o.status === 'approved') },
+  ].filter(s => s.rows.length > 0);
+
   const tabs: Array<{ key: Tab; label: string; count: number }> = [
-    { key: 'pending',     label: 'Pending',     count: pending.length },
-    { key: 'held',        label: 'Held',        count: held.length },
-    { key: 'flagged',     label: 'Flagged',     count: flagged.length },
-    { key: 'approved',    label: 'Confirmed',   count: approved.length },
-    { key: 'all',         label: 'All',         count: all.length },
-    { key: 'cancelled',   label: 'Cancelled',   count: cancelled.length },
+    { key: 'pending',     label: 'Pending',         count: pending.length },
+    { key: 'attention',   label: 'Needs Attention', count: held.length + flagged.length },
+    { key: 'priority',    label: 'PRIORITY',        count: priority.length },
+    { key: 'approved',    label: 'Confirmed',       count: approved.length },
+    { key: 'all',         label: 'All',             count: all.length },
+    { key: 'cancelled',   label: 'Cancelled',       count: cancelled.length },
   ];
 
   const activeTabLabel = tabs.find(t => t.key === tab)?.label ?? '';
@@ -104,8 +147,10 @@ export function Sidebar({
           )}
         </div>
 
-        {/* Seven statuses wrap onto two rows. They used to scroll sideways,
-            which put Cancelled off the edge of the rail. */}
+        {/* Six tabs wrap onto two rows. They used to scroll sideways, which put
+            the last one off the edge of the rail. PRIORITY carries an amber
+            accent so the one time-critical queue reads differently from the
+            status tabs around it. */}
         <div className={styles.tabBar}>
           {tabs.map(t => (
             <button
@@ -114,6 +159,7 @@ export function Sidebar({
               className={[
                 styles.tab,
                 tab === t.key ? styles.activeTab : '',
+                t.key === 'priority' ? styles.tabPriority : '',
                 t.count === 0 ? styles.tabZero : '',
               ].filter(Boolean).join(' ')}
               onClick={() => setTab(t.key)}
@@ -165,23 +211,20 @@ export function Sidebar({
               body="Sync from Shopify to pull in orders placed since the last run."
             />
           )
-        ) : visible.map((o, i) => (
-          <OrderRow
-            key={o.id}
-            order={o}
-            // Drives the load stagger. Capped at 14 so a long queue's last row
-            // isn't held behind a quarter-second run-up it gains nothing from.
-            revealIndex={Math.min(i, 14)}
-            isSelected={o.id === selectedId}
-            onClick={() => onSelect(o.id)}
-            refundFlag={refundFlags.get(o.id) ?? null}
-            commConcern={
-              commAssessments[o.id]?.verdict === 'unclear'
-                ? commAssessments[o.id].headline
-                : null
-            }
-          />
-        ))}
+        ) : tab === 'priority' ? (
+          // Split into Pending / Needs Attention / Confirmed so a confirmed
+          // priority order (already in the ship queue) never sits indistinguishably
+          // next to one still waiting to be confirmed.
+          prioritySections.map(section => (
+            <div key={section.key} className={styles.railGroup}>
+              <div className={styles.railGroupHeader}>
+                {section.label}
+                <span className={styles.railGroupCount}>{section.rows.length}</span>
+              </div>
+              {section.rows.map((o, i) => renderRow(o, i))}
+            </div>
+          ))
+        ) : visible.map((o, i) => renderRow(o, i))}
       </div>
     </aside>
   );

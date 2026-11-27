@@ -584,9 +584,7 @@ describe('EzTransPanel', () => {
     render(<EzTransPanel row={row} order={order} />);
     fillLabel();
     fireEvent.click(confirmButton());
-    expect(await screen.findByText(/in today's batch since/i)).toBeInTheDocument();
-    expect(screen.getByText(/label-and-packing-list-Juanita-M-Wells-PUR123456789\.pdf/))
-      .toBeInTheDocument();
+    expect(await screen.findByText(/in today's EZ Trans email/i)).toBeInTheDocument();
   });
 
   it('lets the operator pull an order back out of today\u2019s batch', async () => {
@@ -599,7 +597,7 @@ describe('EzTransPanel', () => {
         onBatchChanged={onBatchChanged}
       />,
     );
-    fireEvent.click(screen.getByRole('button', { name: /remove from today's batch/i }));
+    fireEvent.click(screen.getByRole('button', { name: /take out of email/i }));
     await waitFor(() => expect(unconfirmMock).toHaveBeenCalledWith('q-1'));
     expect(onBatchChanged).toHaveBeenCalled();
   });
@@ -634,8 +632,8 @@ describe('EzTransPanel', () => {
         order={order}
       />,
     );
-    expect(screen.getByText(/Went out in the Goorooship batch of/i)).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /remove from today's batch/i }))
+    expect(screen.getByText(/Sent to EZ Trans/i)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /take out of email/i }))
       .not.toBeInTheDocument();
   });
 
@@ -694,7 +692,7 @@ describe('the US pesticide worksheet', () => {
     expect(screen.getByText(
       'shipping-label-and-packing-list-1184.pdf, pesticide-worksheet-1184.pdf',
     )).toBeInTheDocument();
-    expect(screen.getByText(/This is a US entry/i)).toBeInTheDocument();
+    expect(screen.getByText(/pesticide worksheet included/i)).toBeInTheDocument();
   });
 
   it('adds it on a US shipment that is not booked with UPS', () => {
@@ -791,7 +789,7 @@ describe('an order for more than one machine', () => {
 
   it('says three machines are held, not one serial', () => {
     render(<EzTransPanel row={THREE_ROW} order={order} />);
-    expect(screen.getByText(/3 machines are/i)).toBeInTheDocument();
+    expect(screen.getByText(/3 machines at EZ Trans/i)).toBeInTheDocument();
   });
 
   it('lists every serial in the shipment facts', () => {
@@ -863,8 +861,8 @@ describe('EzTransPanel — the starter blocks the Goorooship email too', () => {
     render(<EzTransPanel row={row} order={order} starterGap={STARTER_GAP} />);
     fillLabel();
 
-    expect(screen.getByText(/The compost starter comes first/i)).toBeInTheDocument();
-    expect(screen.queryByText(/Carrier, tracking number and the label PDF are all required/i))
+    expect(screen.getByText(/Starter soil ordered” first/i)).toBeInTheDocument();
+    expect(screen.queryByText(/Needs carrier, tracking/i))
       .toBeNull();
   });
 

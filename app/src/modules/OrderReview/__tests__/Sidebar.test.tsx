@@ -55,7 +55,7 @@ function mkOrder(partial: Partial<Order> & { id: string; status: Order['status']
     total_usd: 1149,
     subtotal_usd: null, tax_usd: null, discount_total_usd: null,
     discount_codes: null, payment_methods: null, financial_status: null, tax_lines: null, shipping_line_title: null,
-    attribution_source: null, attribution_medium: null, attribution_campaign: null, attribution_referrer: null,
+    attribution_source: null, attribution_medium: null, attribution_campaign: null, attribution_content: null, attribution_referrer: null,
     attribution_last_source: null, attribution_last_medium: null, attribution_last_referrer: null,
     line_items: [],
     sales_confirmed_fit: false,
@@ -91,6 +91,7 @@ describe('Sidebar', () => {
         pendingBacklog={[]}
         held={[h1]}
         flagged={[f1]}
+        priority={[]}
         approved={[]}
         cancelled={[c1]}
         selectedId={selectedId}
@@ -106,11 +107,57 @@ describe('Sidebar', () => {
     expect(screen.queryByText('Flagged Customer')).not.toBeInTheDocument();
   });
 
+  // Held and Flagged are one tab now — Needs Attention — so opening it shows
+  // both, and the status chip on each row is what tells them apart.
   it('switches tab content when a tab is clicked', () => {
     render_();
-    fireEvent.click(screen.getByRole('button', { name: /^Flagged: 1 order$/ }));
+    fireEvent.click(screen.getByRole('button', { name: /^Needs Attention: 2 orders$/ }));
+    expect(screen.getByText('Held Customer')).toBeInTheDocument();
     expect(screen.getByText('Flagged Customer')).toBeInTheDocument();
     expect(screen.queryByText('Alice Ames')).not.toBeInTheDocument();
+  });
+
+  // Walmart / Best Buy orders land in PRIORITY automatically; a hand-pinned one
+  // joins them. The tab is a cross-cut, so an order there is still in its real
+  // status tab too.
+  it('lists priority orders under the PRIORITY tab', () => {
+    const wal = mkOrder({ id: 'w1', status: 'pending', customer_name: 'Wanda Walmart', sales_channel: 'Walmart' });
+    render(
+      <Sidebar
+        all={[p1, wal]} pending={[p1, wal]} pendingBacklog={[]}
+        held={[]} flagged={[]} priority={[wal]} approved={[]} cancelled={[]}
+        selectedId={null} onSelect={vi.fn()}
+      />,
+    );
+    expect(screen.queryByText('Wanda Walmart')).toBeInTheDocument(); // in Pending (default)
+    fireEvent.click(screen.getByRole('button', { name: /^PRIORITY: 1 order$/ }));
+    expect(screen.getByText('Wanda Walmart')).toBeInTheDocument();
+    expect(screen.queryByText('Alice Ames')).not.toBeInTheDocument();
+  });
+
+  // PRIORITY spans statuses, so it splits into Pending / Confirmed sections. The
+  // refs are set so a flat by-ref sort would put the CONFIRMED order first —
+  // proving the section order (Pending leads) is what's driving the layout, not
+  // the ref sort.
+  it('groups the PRIORITY tab with Pending ahead of Confirmed', () => {
+    const walP = mkOrder({ id: 'wp', status: 'pending',  customer_name: 'Pending Priority',   sales_channel: 'Walmart',  order_ref: '#2002' });
+    const bbC  = mkOrder({ id: 'bc', status: 'approved', customer_name: 'Confirmed Priority', sales_channel: 'Best Buy', order_ref: '#2001' });
+    render(
+      <Sidebar
+        all={[walP, bbC]} pending={[walP]} pendingBacklog={[]}
+        held={[]} flagged={[]} priority={[walP, bbC]} approved={[bbC]} cancelled={[]}
+        selectedId={null} onSelect={vi.fn()}
+      />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: /^PRIORITY: 2 orders$/ }));
+    const pending = screen.getByText('Pending Priority');
+    const confirmed = screen.getByText('Confirmed Priority');
+    expect(pending).toBeInTheDocument();
+    expect(confirmed).toBeInTheDocument();
+    // Pending row precedes Confirmed row in the DOM despite the higher ref.
+    expect(
+      pending.compareDocumentPosition(confirmed) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
   });
 
   it('filters by search query within the active tab', () => {
@@ -129,7 +176,7 @@ describe('Sidebar', () => {
     render(
       <Sidebar
         all={[p1, stale]} pending={[p1]} pendingBacklog={[stale]}
-        held={[]} flagged={[]} approved={[]} cancelled={[]}
+        held={[]} flagged={[]} priority={[]} approved={[]} cancelled={[]}
         selectedId={null} onSelect={vi.fn()}
       />,
     );
@@ -149,7 +196,7 @@ describe('Sidebar', () => {
     render(
       <Sidebar
         all={[p1, refunded]} pending={[p1]} pendingBacklog={[refunded]}
-        held={[]} flagged={[]} approved={[]}
+        held={[]} flagged={[]} priority={[]} approved={[]}
         cancelled={[]} selectedId={null} onSelect={vi.fn()}
       />,
     );
@@ -184,7 +231,7 @@ describe('Sidebar', () => {
   it('shows empty-state copy when the active tab has no rows', () => {
     render(
       <Sidebar
-        all={[]} pending={[]} pendingBacklog={[]} held={[]} flagged={[]} approved={[]} cancelled={[]}
+        all={[]} pending={[]} pendingBacklog={[]} held={[]} flagged={[]} priority={[]} approved={[]} cancelled={[]}
         selectedId={null} onSelect={vi.fn()}
       />,
     );
@@ -215,7 +262,7 @@ describe('Sidebar', () => {
     });
     render(
       <Sidebar
-        all={[]} pending={[]} pendingBacklog={[]} held={[]} flagged={[]} approved={[]}
+        all={[]} pending={[]} pendingBacklog={[]} held={[]} flagged={[]} priority={[]} approved={[]}
         cancelled={[newer, older]}
         selectedId={null} onSelect={vi.fn()}
       />,

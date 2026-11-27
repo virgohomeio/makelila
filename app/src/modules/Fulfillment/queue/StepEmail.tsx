@@ -4,26 +4,34 @@ import {
   shipmentEmailVars,
   renderShipmentEmail,
   type FulfillmentQueueRow,
+  type SendFulfillmentEmailResult,
 } from '../../../lib/fulfillment';
 import { markOrderShipped } from '../../../lib/orders';
 import { useOrderRecipient } from '../../../lib/orderRecipient';
 import { useEmailTemplate, updateTemplate, createTemplate } from '../../../lib/templates';
 import {
   SHIPMENT_EMAIL_DEFAULT,
+  SHIPMENT_EMAIL_TEMPLATE_KEY,
   SHIPMENT_EMAIL_VARIABLES,
+  SHIPMENT_SMS_DEFAULT,
   unsupportedVariables,
 } from '../../../lib/shipmentEmailTemplate';
 import { StepBlockers } from './StepBlockers';
 import styles from '../Fulfillment.module.css';
 
-/** Step 5 renders SHIPMENT_EMAIL_DEFAULT unless the stored
+/** Step 4 — straight after "Pickup scheduled", while the card is still under
+ *  Ready to ship. Sends the shipping email (shipping info, tracking, signature
+ *  required) and a condensed Quo text of it; the Lovely App + onboarding-call
+ *  instructions follow automatically a day later (send-onboarding-instructions).
+ *
+ *  Renders SHIPMENT_EMAIL_DEFAULT unless the stored
  *  'shipment_confirmation' row overrides it, and sends exactly what is on
  *  screen — so the draft and the email cannot drift apart.
  *
  *  The operator can edit the subject/body in place. An edit applies to that one
  *  send unless they also press "Save as default", which stores it for every
  *  shipment after it. */
-const TEMPLATE_KEY = 'shipment_confirmation';
+const TEMPLATE_KEY = SHIPMENT_EMAIL_TEMPLATE_KEY;
 
 export function StepEmail({
   row,
@@ -37,11 +45,12 @@ export function StepEmail({
   order: {
     id: string; customer_name: string; customer_email: string | null;
     customer_id?: string | null; order_ref: string; country: 'US'|'CA';
+    kind?: 'sale' | 'replacement'; customer_phone?: string | null;
   };
   /** Ask the board to re-read the queue. The send moves the row to step 6 in
    *  the database, but the board learns that over a realtime socket it is
    *  documented to drop, so it is told explicitly too. */
-  onSent?: () => void;
+  onSent?: (result: SendFulfillmentEmailResult) => void;
 }) {
   const [busy, setBusy] = useState(false);
   // Confirmation the operator can trust the instant the send returns. Relying
@@ -72,6 +81,11 @@ export function StepEmail({
   const [subjectEdit, setSubjectEdit] = useState<string | null>(null);
   const [bodyEdit, setBodyEdit] = useState<string | null>(null);
   const [saveState, setSaveState] = useState<'idle' | 'confirm' | 'saving' | 'saved'>('idle');
+
+  const baseSms = renderShipmentEmail(SHIPMENT_SMS_DEFAULT, vars);
+  const [smsEdit, setSmsEdit] = useState<string | null>(null);
+  const [sendSms, setSendSms] = useState(true);
+  const sms = smsEdit ?? baseSms;
 
   const subject = subjectEdit ?? baseSubject;
   const body = bodyEdit ?? baseBody;
@@ -115,9 +129,11 @@ export function StepEmail({
       // The rendered text always travels with the request. The edge function
       // has no copy of the wording of its own, so what is on screen here is
       // exactly what Resend is handed.
-      await sendFulfillmentEmail(row.id, { subject, body, edited: dirty });
+      const result = await sendFulfillmentEmail(row.id, {
+        subject, body, edited: dirty, sms: sendSms ? sms : undefined,
+      });
       setJustSent(true);
-      onSent?.();
+      onSent?.(result);
     }
     catch (e) { setError((e as Error).message); }
     finally { setBusy(false); }
@@ -159,7 +175,13 @@ export function StepEmail({
 
   return (
     <div>
-      <h3 style={{ fontSize: 13, fontWeight: 700, marginBottom: 8 }}>Send the shipment-confirmation email</h3>
+      <h3 style={{ fontSize: 13, fontWeight: 700, marginBottom: 4 }}>Send the shipping email + Quo text</h3>
+      <div style={{ fontSize: 10, color: 'var(--color-ink-subtle)', marginBottom: 8 }}>
+        {order.kind === 'replacement'
+          ? 'Replacement order — no onboarding email follows.'
+          : <>The <strong>“ACTION NEEDED: Onboarding Instructions for your LILA”</strong> email and
+            its Quo text go out automatically 24 hours after this is sent — no button to press.</>}
+      </div>
 
       {tplLoading && <div style={{ fontSize: 11, color: 'var(--color-ink-subtle)' }}>Loading the saved wording…</div>}
       {!tplLoading && staleVars.length > 0 && (
@@ -215,13 +237,6 @@ export function StepEmail({
             />
           </label>
 
-          {/* The textarea is plain text, so the install guide can only appear
-              here as a URL. Without this line an operator would reasonably
-              assume the customer gets a bare link and "fix" it by deleting it. */}
-          <div style={{ fontSize: 10, color: 'var(--color-ink-subtle)', marginBottom: 4 }}>
-            A line that is only an image URL is sent as the picture itself — that is how the
-            Lovely install guide reaches the customer. Keep it on its own line.
-          </div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', margin: '4px 0 2px' }}>
             {dirty && (
@@ -259,11 +274,38 @@ export function StepEmail({
         </>
       )}
 
+      {!tplLoading && (
+        <div style={{ margin: '8px 0 4px' }}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 10, color: 'var(--color-ink-subtle)' }}>
+            <input type="checkbox" checked={sendSms} onChange={e => setSendSms(e.target.checked)} />
+            Also send as a Quo text to the phone on file
+            {order.customer_phone ? ` (${order.customer_phone})` : ' (from the customer record)'}
+          </label>
+          {sendSms && (
+            <textarea
+              value={sms}
+              onChange={e => setSmsEdit(e.target.value)}
+              rows={Math.min(10, Math.max(4, sms.split('\n').length + 2))}
+              aria-label="Quo text"
+              style={{
+                display: 'block', width: '100%', marginTop: 4,
+                background: 'var(--color-surface)', border: '1px solid var(--color-border)',
+                padding: 8, borderRadius: 4, fontSize: 10, lineHeight: 1.5,
+                fontFamily: 'inherit', resize: 'vertical',
+              }}
+            />
+          )}
+          {sendSms && sms.length > 1600 && (
+            <div style={{ color: 'var(--color-error)', fontSize: 10 }}>Text is over 1600 characters.</div>
+          )}
+        </div>
+      )}
+
       {alreadySent && (
         <div style={{ fontSize: 11, color: 'var(--color-success, #2f855a)', margin: '6px 0' }}>
           ✓ Email sent{row.email_sent_at
             ? ` at ${new Date(row.email_sent_at).toLocaleString()}`
-            : ' — this order is now fulfilled'}.
+            : ''}.
         </div>
       )}
       <label className={styles.shippingCostLabel}>
@@ -287,9 +329,9 @@ export function StepEmail({
         <button
           className={styles.confirmBtn}
           onClick={handleSend}
-          disabled={!canSend || busy || alreadySent || shippingCost.trim() === ''}
+          disabled={!canSend || busy || alreadySent || shippingCost.trim() === '' || (sendSms && sms.length > 1600)}
         >
-          {busy ? 'Sending…' : alreadySent ? '✓ Email sent' : '✉ Send email'}
+          {busy ? 'Sending…' : alreadySent ? '✓ Email sent' : sendSms ? '✉ Send email + text' : '✉ Send email'}
         </button>
         {!alreadySent && <StepBlockers blockers={blockers} />}
       </div>

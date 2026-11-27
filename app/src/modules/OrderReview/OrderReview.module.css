@@ -270,6 +270,28 @@
 .tabZero { color: var(--color-ink-faint); }
 .tabZero .tabCount { color: var(--color-ink-faint); }
 
+/* PRIORITY is the one time-critical queue, so it reads in amber rather than the
+   neutral treatment the status tabs share — and in amber fill, not crimson,
+   when it is the active tab. */
+.tab.tabPriority {
+  border-color: var(--color-warning-border);
+  color: var(--color-warning);
+}
+.tab.tabPriority .tabCount {
+  background: var(--color-warning-bg);
+  color: var(--color-warning);
+}
+.tab.tabPriority:hover { border-color: var(--color-warning-strong); color: var(--color-warning); }
+.tab.tabPriority.activeTab {
+  background: var(--color-warning-strong);
+  border-color: var(--color-warning-strong);
+  color: var(--color-raised);
+}
+.tab.tabPriority.activeTab .tabCount {
+  background: rgba(var(--color-ink-rgb), 0.18);
+  color: var(--color-raised);
+}
+
 .railCount {
   font-size: 10px;
   font-weight: 700;
@@ -446,6 +468,33 @@
   text-align: center;
 }
 
+/* Status sections inside the PRIORITY tab. The header sticks to the top of the
+   scroll area so you always know whether the rows under your eye are still to be
+   confirmed or already in the ship queue. */
+.railGroupHeader {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: var(--space-2) var(--space-3);
+  background: var(--color-page);
+  border-bottom: 1px solid var(--color-border);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  color: var(--color-ink-subtle);
+}
+.railGroupCount {
+  font-family: var(--font-mono);
+  font-variant-numeric: var(--font-numeric);
+  color: var(--color-ink-faint);
+}
+/* A hair of space between one section's last row and the next header. */
+.railGroup + .railGroup .railGroupHeader { margin-top: var(--space-2); }
+
 /* ── Order row — the 2×2 grid ────────────────────────────────────────────── */
 /* The identity column keeps a floor. The tag strip is an `auto` track, so a
    heavily tagged order (refund + dwelling + area + country) used to bid for as
@@ -564,6 +613,40 @@
   background: var(--color-warning-bg);
   color: var(--color-warning);
   border: 1px solid var(--color-warning-border);
+}
+
+/* This sale came through a reseller marketplace (Walmart / Best Buy), not our
+   own site — flagged blue so a marketplace order is obvious at a glance in the
+   rail. Our own storefront carries no tag. */
+.tagReseller {
+  background: var(--color-info-bg);
+  color: var(--color-info);
+  border: 1px solid var(--color-info-border);
+}
+
+/* Hand-pinned priority. Amber, and it leads the tag row — the whole point is
+   that it catches the eye. Reseller orders are priority too but wear their own
+   marketplace tag, so this one is reserved for orders with no other reason
+   showing. */
+.tagPriority {
+  background: var(--color-warning-bg);
+  color: var(--color-warning);
+  border: 1px solid var(--color-warning-strong);
+}
+
+/* Held and Flagged live in one rail tab (Needs Attention) now, so the row says
+   which it is. Flagged is the louder of the two — it means a problem was
+   raised, not just a pause — so it borrows the warning palette; Held stays
+   quiet. */
+.tagFlaggedStatus {
+  background: var(--color-warning-bg);
+  color: var(--color-warning);
+  border: 1px solid var(--color-warning-border);
+}
+.tagHeldStatus {
+  background: var(--color-surface);
+  color: var(--color-ink-muted);
+  border: 1px solid var(--color-ink-faint);
 }
 
 /* Money already went back on THIS order — confirming it would ship a machine
@@ -768,6 +851,34 @@
   color: var(--color-ink-muted);
 }
 .actionRelease:hover { border-color: var(--color-ink-faint); color: var(--color-ink); }
+
+/* Make priority. Off, it borrows the quiet outline the reversible dispositions
+   share; pinned, it fills amber to match the row's star and the PRIORITY tab.
+   The auto variant is a reseller order's fixed badge — amber, but not a
+   control, so it shows no hover and no pointer. */
+.actionPriority {
+  background: var(--color-raised);
+  border-color: var(--color-border);
+  color: var(--color-ink-muted);
+}
+.actionPriority:hover {
+  border-color: var(--color-warning-strong);
+  color: var(--color-warning);
+  background: var(--color-warning-bg);
+}
+.actionPriorityOn {
+  background: var(--color-warning-bg);
+  border-color: var(--color-warning-strong);
+  color: var(--color-warning);
+  font-weight: 700;
+}
+.actionPriorityAuto {
+  background: var(--color-warning-bg);
+  border-color: var(--color-warning-strong);
+  color: var(--color-warning);
+  font-weight: 700;
+  cursor: default;
+}
 
 /* Confirm step, inline rather than a browser confirm(): the question names the
    order and says what happens, which a native dialog cannot. */
@@ -1561,6 +1672,18 @@
 /* A multi-unit building with no unit number on the order. A freight driver
    with nowhere to deliver leaves the pallet in a lobby or returns it to the
    terminal, so this is the loudest thing on the card. */
+.unitInput {
+  font-size: inherit;
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--color-border);
+  background: var(--color-raised);
+  color: var(--color-ink);
+  min-width: 0;
+  width: 10em;
+}
+.unitInputMissing { border-color: var(--color-error-border); }
+
 .unitAlert {
   display: flex;
   flex-direction: column;

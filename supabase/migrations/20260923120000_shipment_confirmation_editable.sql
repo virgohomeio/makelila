@@ -55,7 +55,9 @@ Tracking Link: {{tracking_url}}
 {{starter_block}}
 You can use the link above to check on your delivery progress at any time.
 
-Before you set up your LILA: get the Lovely App
+Before you set up your LILA: get the Lovely App (required to activate your warranty)
+
+IMPORTANT: Signing in to the Lovely app is mandatory to activate your LILA''s warranty. Please create your account and sign in as soon as your LILA arrives.
 
 Lovely is LILA''s companion app, and you''ll need it to get started. It walks you through setup step by step, lets you check on and control your LILA from your phone, and sends you alerts when your LILA needs attention.
 
@@ -75,12 +77,19 @@ https://lila.vip/lovely-install-guide.png
 
 Once it''s added, always open Lovely from the ladybug icon on your home screen rather than from your browser, and tap Allow when it asks to send notifications. That way you won''t miss any alerts from your LILA.
 
+IMPORTANT: Before you use your LILA for the first time, open Lovely and follow all of the onboarding steps in the app. Please don''t start using your LILA until you''ve completed them.
+
 Questions or trouble installing? Just reply to this email and we''ll help.
 
 Important next steps
 
-1. Mandatory onboarding session
+1. Sign in to the Lovely app to activate your warranty
+Your LILA''s warranty is only activated once you sign in to the Lovely app. Please don''t skip this step.
+
+2. Mandatory onboarding session
 Once your unit arrives, you''ll need to book a mandatory onboarding session before using LILA. This session is required to ensure your first batches produce high-quality compost, avoid common mistakes, and help you get the best results from day one.
+
+IMPORTANT: Please book your onboarding session only AFTER you have successfully completed all of the onboarding steps in the Lovely app. Your session is built around a LILA that is already set up and connected, so if the in-app steps aren''t finished yet, we may need to reschedule.
 
 Book a weekday session (business hours):
 https://calendly.com/lila-ed/intro-call
@@ -88,7 +97,7 @@ https://calendly.com/lila-ed/intro-call
 Evenings or weekends work better? Book here:
 https://calendly.com/lila-ed/lila-onboarding-with-danica-patrik
 
-2. Please keep the original box
+3. Please keep the original box
 Please do not throw out the original packaging for the first 30 days after delivery. In the rare event of shipping damage or if a return is required during our 30-day refund period, the unit must be returned in its original box.
 
 Thank you again for being part of the LILA community and supporting our mission to make composting effortless and sustainable. We can''t wait to see the difference your LILA will make in your home.

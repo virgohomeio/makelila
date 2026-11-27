@@ -1,3 +1,4 @@
+import { shipDeadlines } from './shipDeadlines';
 import { useEffect, useMemo, useState } from 'react';
 import type { RealtimeChannel } from '@supabase/supabase-js';
 import { supabase } from './supabase';
@@ -44,6 +45,16 @@ export type Order = {
   order_ref: string;
   kind: OrderKind;
   status: OrderStatus;
+  // Operator-set "work this first" flag, independent of status. A priority
+  // order still lives in its real status bucket (Pending / Needs Attention /
+  // Confirmed) AND surfaces in the PRIORITY tab. Walmart and Best Buy orders
+  // are priority automatically (see isPriority) regardless of this column —
+  // this flag is only for the ones an operator pins by hand.
+  //
+  // Optional for the same gated-migration reason sales_channel is: a frontend
+  // deploy can land before the migration runs, and select('*') then comes back
+  // without the key. Absent/false both read as "not hand-pinned".
+  is_priority?: boolean | null;
   // Canonical FK to customers.id (backlog #68). Auto-populated by the
   // orders_auto_customer_id trigger; sync-shopify-orders doesn't need to
   // set it explicitly. Use this for any "the customer for this order"
@@ -75,6 +86,11 @@ export type Order = {
   shipping_cost_currency: string | null;
   shipped_at: string | null;
   delivered_at: string | null;
+  /** Received with no arrival date on record — set in bulk for boxes that
+   *  shipped before October 2026, where nobody knows the day it landed.
+   *  Counts as received everywhere the Received rail looks; delivered_at
+   *  stays null so no invented date reaches the customer timeline. */
+  received_undated?: boolean;
   // Backlog #55 follow-up — carrier tracking. Populated by the Fulfillment
   // step OR backfilled from the fulfillment Excel for replacement orders.
   // Per operator: tracking_num IS NOT NULL ⇒ shipped, NULL ⇒ to be shipped.
@@ -153,11 +169,22 @@ export type Order = {
   discount_codes: string[] | null;
   payment_methods: string[] | null;
   financial_status: string | null;
+  // Which Shopify sales channel the order transacted through, as a friendly
+  // label (Our Website / Walmart / Best Buy / Shopify Collective / …), set by
+  // sync-shopify-orders from Shopify's source_name. Optional for the gated-
+  // migration reason reconciled_at is: select('*') on an environment that
+  // hasn't run the migration returns rows without the key. NULL/absent reads as
+  // "Our Website" in the Journey Report (the storefront is the default channel).
+  sales_channel?: string | null;
   // Per-order Shopify acquisition source (utm → referrer host → direct), set by
   // sync-shopify-orders. Preferred over the customer's first-touch in reporting.
   attribution_source: string | null;
   attribution_medium: string | null;
   attribution_campaign: string | null;
+  // utm_content from the landing URL — for Meta ads this carries the exact ad
+  // creative (e.g. "Fall 2026 v1 - v28a"); the Journey Report reads the creative
+  // code (v28a) out of it for a deterministic per-order "Saw Meta Ad v28a".
+  attribution_content: string | null;
   // The specific referring URL from Shopify's customer journey (e.g. a Linktree
   // or Instagram link) — shown in the Report so a "Referral" isn't anonymous.
   attribution_referrer: string | null;
@@ -304,11 +331,26 @@ const FULFILLMENT_QUEUE_URL = `${APP_BASE_URL}/fulfillment/queue`;
  *  so a mail failure must never surface as a failed confirmation. An operator
  *  who saw Confirm fail would click it again, and on this action that means a
  *  second order_approve in the log for an order that was already confirmed. */
+/** How the confirmed-sale email names the order, subject line first:
+ *  "PRIORITY Walmart order", "PRIORITY Best Buy order", "PRIORITY order" for a
+ *  hand-pinned one, plain "Sale" otherwise. The template subject is
+ *  "{{sale_kind}} confirmed — {{order_ref}} · {{customer_name}}". */
+export function saleKindLabel(
+  o: Partial<Pick<Order, 'sales_channel' | 'is_priority'>>,
+): string {
+  const reseller = resellerLabel({ sales_channel: o.sales_channel ?? null });
+  if (reseller === 'Walmart' || reseller === 'Best Buy') return `PRIORITY ${reseller} order`;
+  if (o.is_priority) return 'PRIORITY order';
+  return 'Sale';
+}
+
 async function notifySaleConfirmed(
   order: Pick<Order, 'id' | 'order_ref' | 'customer_name'> &
-    Partial<Pick<Order, 'total_usd' | 'currency'>>,
+    Partial<Pick<Order, 'total_usd' | 'currency' | 'sales_channel' | 'is_priority'>>,
   confirmedByEmail: string | null,
 ): Promise<void> {
+  const d = shipDeadlines(new Date());
+  const day = (x: Date) => x.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
   try {
     await sendTemplate({
       template_key: 'sale_confirmed',
@@ -324,6 +366,10 @@ async function notifySaleConfirmed(
           ? `${Number(order.total_usd).toFixed(2)} ${order.currency ?? ''}`.trim()
           : '\u2014',
         confirmed_by: confirmedByEmail ?? 'An operator',
+        sale_kind: saleKindLabel(order),
+        channel: resellerLabel({ sales_channel: order.sales_channel ?? null }) ?? 'Website',
+        schedule_by: day(d.scheduleBy),
+        pickup_by: day(d.pickupBy),
         queue_url: FULFILLMENT_QUEUE_URL,
         order_url: `${APP_BASE_URL}/order-review/${order.id}`,
       },
@@ -335,7 +381,7 @@ async function notifySaleConfirmed(
 
 export async function disposition(
   order: Pick<Order, 'id' | 'order_ref' | 'customer_name'> &
-    Partial<Pick<Order, 'total_usd' | 'currency' | 'kind'>>,
+    Partial<Pick<Order, 'total_usd' | 'currency' | 'kind' | 'sales_channel' | 'is_priority'>>,
   status: Disposition,
   reason?: string,
 ): Promise<void> {
@@ -512,6 +558,58 @@ export const AREA_TYPE_TAG: Record<AreaType, string> = {
   rural:    'Rural',
 };
 
+/** The reseller marketplace an order came through, or null for our own Shopify
+ *  storefront. Read off orders.sales_channel (the label sync-shopify-orders
+ *  resolves from Shopify's source_name) by keyword, so a channel-name variant
+ *  still lands in the right bucket. Only resellers get a label — a null return
+ *  means "our website", which carries no marker. Mirrors the Journey Report's
+ *  Sale Source bucketing (saleSourceOf) so the two agree. */
+export function resellerLabel(o: Pick<Order, 'sales_channel'>): 'Walmart' | 'Best Buy' | 'Shopify Collective' | null {
+  const lc = (o.sales_channel ?? '').trim().toLowerCase();
+  if (lc.includes('walmart')) return 'Walmart';
+  if (lc.includes('best buy') || lc.includes('bestbuy')) return 'Best Buy';
+  if (lc.includes('collective')) return 'Shopify Collective';
+  return null;
+}
+
+/** Whether an order belongs in the PRIORITY tab. Two independent reasons, and
+ *  either alone is enough:
+ *
+ *    - It came through a reseller marketplace that promises the customer a fast
+ *      turnaround (Walmart, Best Buy). These are priority automatically and
+ *      cannot be un-prioritised — missing a marketplace SLA risks the channel.
+ *    - An operator pinned it by hand (is_priority), for a reason the row itself
+ *      doesn't carry — a VIP, a promised date, a complaint to get ahead of.
+ *
+ *  Reseller is read off sales_channel (synced from Shopify), so it needs no
+ *  column of its own and is live the moment an order syncs. */
+export function isPriority(o: Order): boolean {
+  return resellerLabel(o) !== null || o.is_priority === true;
+}
+
+/** True only for the reseller-driven, automatic kind of priority — the kind an
+ *  operator can't toggle off. The action bar uses it to show a fixed badge
+ *  rather than a toggle. */
+export function isAutoPriority(o: Order): boolean {
+  return resellerLabel(o) !== null;
+}
+
+/** Pin or unpin an order's hand-set priority flag. No-op semantics on a reseller
+ *  order are enforced in the UI (the toggle isn't offered) rather than here, so
+ *  this stays a plain column write. Logged so the order's history shows who
+ *  pinned it and when. */
+export async function setOrderPriority(
+  order: Pick<Order, 'id' | 'order_ref'>,
+  value: boolean,
+): Promise<void> {
+  const { error } = await supabase
+    .from('orders')
+    .update({ is_priority: value })
+    .eq('id', order.id);
+  if (error) throw error;
+  await logAction(value ? 'order_prioritized' : 'order_deprioritized', order.order_ref);
+}
+
 /** Operator override of the auto-guessed area type. Flips the source to
  *  'manual' so a later Shopify re-sync won't clobber the choice. Passing null
  *  clears it back to unclassified (and back to auto provenance). */
@@ -534,6 +632,31 @@ export async function setDwelling(id: string, value: Dwelling): Promise<void> {
     .eq('id', id);
   if (error) throw error;
   await logAction('address_dwelling_set', id, value);
+}
+
+/** Operator entry of the apartment/unit number, for the order the verify step
+ *  flagged as a multi-unit building with none on file. Getting the number from
+ *  the customer is the only way that blocker clears, and until now there was
+ *  nowhere to type it.
+ *
+ *  The unit status goes to 'ok' because a person has it from the customer; a
+ *  later Re-verify still checks it against the postal authority and can come
+ *  back 'unrecognized'. Clearing the field puts the status back to unknown
+ *  rather than guessing. sync-shopify-orders never overwrites a unit number
+ *  with Shopify's blank, so this survives the next sync. */
+export async function setAddressLine2(id: string, value: string): Promise<void> {
+  const line2 = value.trim() || null;
+  const { error } = await supabase
+    .from('orders')
+    .update({ address_line2: line2, address_unit_status: line2 ? 'ok' : null })
+    .eq('id', id);
+  if (error) throw error;
+  await logAction(
+    line2 ? 'address_unit_set' : 'address_unit_cleared',
+    id,
+    line2 ? `apartment/unit # set to "${line2}"` : 'apartment/unit # cleared',
+    { entityType: 'order', entityId: id },
+  );
 }
 
 export async function updateFreightEstimate(id: string, amount: number): Promise<void> {
@@ -625,6 +748,12 @@ export type OrderBuckets = {
   pendingBacklog: Order[];
   held: Order[];
   flagged: Order[];
+  /** Confirmed orders to ship first — a post-confirmation queue, not a status.
+   *  Every Walmart / Best Buy order (automatic — see isPriority) plus any an
+   *  operator pinned by hand, but only once CONFIRMED: a pending priority order
+   *  stays in Pending and appears here when it is approved. These rows are also
+   *  in `approved`. Reseller orders lead, then hand-pinned, each oldest first. */
+  priority: Order[];
   /** The live ship queue. */
   approved: Order[];
   /** Terminal: cancelled from Sales or from the fulfillment queue. Out of every
@@ -716,9 +845,11 @@ function isPendingQueueWork(order: Order): boolean {
  *  is simply every approved order.
  */
 
-/** Oldest first — a backlog is read to work through it, not to skim it. */
+/** Oldest first — a backlog is read to work through it, not to skim it. Fails
+ *  open like withinSalesQueue: an order missing both dates sorts to the top
+ *  rather than crashing the comparator (and with it the whole rail). */
 function byAgeAscending(a: Order, b: Order): number {
-  return (a.placed_at ?? a.created_at).localeCompare(b.placed_at ?? b.created_at);
+  return (a.placed_at ?? a.created_at ?? '').localeCompare(b.placed_at ?? b.created_at ?? '');
 }
 
 export function bucketOrders(
@@ -803,12 +934,24 @@ export function bucketOrders(
   const allPending  = active.filter(o => o.status === 'pending');
   const allApproved = active.filter(o => o.status === 'approved');
 
+  // Priority is a post-confirmation ship-order queue, NOT a cross-cut over every
+  // status: an order becomes "work this first" only once it has been confirmed,
+  // so it draws from the confirmed (approved) set alone. A pending Walmart order
+  // stays in Pending and surfaces here the moment it is confirmed. Reseller-driven
+  // priority leads the hand-pinned, each oldest-first — a marketplace SLA is the
+  // more time-critical of the two and belongs on top.
+  const priority = [
+    ...allApproved.filter(o => isAutoPriority(o)).sort(byAgeAscending),
+    ...allApproved.filter(o => !isAutoPriority(o) && o.is_priority === true).sort(byAgeAscending),
+  ];
+
   return {
     all:      active,
     pending:  allPending.filter(isPendingQueueWork),
     pendingBacklog: allPending.filter(o => !isPendingQueueWork(o)).sort(byAgeAscending),
     held:     active.filter(o => o.status === 'held'),
     flagged:  active.filter(o => o.status === 'flagged'),
+    priority,
     approved: allApproved,
     cancelled,
   };
@@ -2230,19 +2373,19 @@ const REPLACEMENT_ORDER_DEFAULTS = {
   sales_confirmed_fit: false,
 };
 
-/** Put an order into the fulfillment queue at step 1, due in 7 days — the same
- *  SLA the auto_enqueue_on_approve trigger applies when a sale is confirmed.
+/** Put an order into the fulfillment queue at step 1, due tomorrow — the same
+ *  SLA the auto_enqueue_on_approve trigger applies when a sale is confirmed:
+ *  pickup booked by confirm day + 1, picked up by + 2 (lib/shipDeadlines.ts).
  *
  *  A duplicate is success, not failure: fulfillment_queue.order_id is unique,
  *  so a 23505 means the order is already queued (the trigger got there first,
  *  or this is a retry after a partial failure). Anything else is real. */
 export async function enqueueForFulfillment(orderId: string): Promise<void> {
   await assertNotRefunded(orderId, 'Cannot queue this order for fulfillment');
-  const due = new Date();
-  due.setDate(due.getDate() + 7);
+  const due = shipDeadlines(new Date()).scheduleBy;
   const { error } = await supabase.from('fulfillment_queue').insert({
     order_id: orderId,
-    due_date: due.toISOString().slice(0, 10),
+    due_date: localDayString(due),
   });
   if (error && error.code !== '23505') {
     throw new Error(`Could not queue the order for fulfillment: ${error.message}`);

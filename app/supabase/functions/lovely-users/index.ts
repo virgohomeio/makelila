@@ -63,7 +63,9 @@ Deno.serve(async (req: Request) => {
   const { data: users, error: dbErr } = await lovely
     .from('users')
     .select(
-      'id, email, first_name, last_name, serial_number, onboarding_step, is_verified, verified_at, mailing_list, last_login_at, login_count, created_at, updated_at',
+      // onboarding_step_at needs the Lovely migration
+      // schema/migrations/onboarding_step_at_2026_10_16.sql applied first.
+      'id, email, first_name, last_name, phone_number, serial_number, onboarding_step, onboarding_step_at, is_verified, verified_at, mailing_list, last_login_at, login_count, created_at, updated_at',
     )
     .order('last_login_at', { ascending: false, nullsFirst: false });
 

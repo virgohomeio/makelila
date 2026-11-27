@@ -1262,7 +1262,15 @@ async function currentUserId(): Promise<string> {
  *  happen either way. */
 export type RefundRequestOpts = {
   onAutoCancel?: (outcome: AutoCancelOutcome) => void;
+  /** A reimbursement: we are paying the customer back for something (a part
+   *  they bought, a shipping charge, a repair) — NOT unwinding a sale. Nothing
+   *  of theirs is cancelled or pulled from the fulfillment queue. */
+  reimbursement?: boolean;
 };
+
+/** Prefix that marks a refund card as a reimbursement. refund_approvals has no
+ *  column for it, so the reason carries it — visible on the card and in reports. */
+export const REIMBURSEMENT_REASON_PREFIX = 'Reimbursement';
 
 export async function submitRefundRequest(input: {
   return_id?: string;
@@ -1310,7 +1318,10 @@ export async function submitRefundRequest(input: {
   // created when it plainly was. It is NOT silent though — a failure is logged
   // to the activity trail and handed to onAutoCancel, so the operator is told
   // to cancel by hand rather than left believing it happened.
-  try {
+  if (opts.reimbursement) {
+    await logAction('refund_auto_cancel_skipped', newRefundId,
+      'Reimbursement — the customer\'s orders were left untouched');
+  } else try {
     const outcome = await cancelOpenOrdersForRefund({
       refundId: newRefundId,
       customerEmail: input.customer_email,
@@ -1384,6 +1395,15 @@ export async function defaultRefundAmountFromInvoice(
 export async function compileReturnToRefund(
   r: ReturnRow, opts: RefundRequestOpts = {},
 ): Promise<void> {
+  // "Discard → Completeness" compiles straight from the intake column, where
+  // the return is still created/pickup_scheduled/picked_up. Settle the unit
+  // question first (BR-7: customer discards a defective unit), otherwise every
+  // later gate — managerApprove, financeApprove — rejects the card and it sits
+  // in Manager Review however often the manager clicks Confirm. Done before the
+  // card is created so a failed write can't leave a stuck card behind.
+  if (r.disposition === 'discard' && !returnStatusAllowsRefund(r.status)) {
+    await updateReturnStatus(r.id, 'discarded');
+  }
   const usePurchaser = r.is_purchaser === false;
   const email = ((usePurchaser && r.purchaser_email?.trim()) ? r.purchaser_email.trim() : r.customer_email) ?? undefined;
   const opening = await defaultRefundAmountFromInvoice(email, r.original_order_ref, r.refund_amount_usd);

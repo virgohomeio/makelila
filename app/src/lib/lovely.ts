@@ -21,6 +21,11 @@ export type LovelyUser = {
   login_count: number | null;
   created_at: string | null;
   updated_at: string | null;
+  // Optional: older lovely-users deploys don't return these.
+  phone_number?: string | null;
+  /** When onboarding_step last changed (Lovely trigger, tracked from
+   *  2026-10-16). Null when the user was already mid-setup before that. */
+  onboarding_step_at?: string | null;
 };
 
 export function useLovelyUsers() {
@@ -78,15 +83,21 @@ export function useLovelyUsers() {
 // Canonical onboarding order, mirrored from the Lovely app
 // (app/onboarding/page.tsx + app/api/onboarding/route.ts). 'pairing' is the
 // initial DB default (just signed up); 'tour_done' = fully onboarded.
-export const ONBOARDING_STEPS: { code: string; label: string }[] = [
-  { code: 'pairing',          label: 'Signed up' },
-  { code: 'welcome_done',     label: 'Welcome' },
-  { code: 'quiz_done',        label: 'Preference quiz' },
-  { code: 'customizing_done', label: 'Customizing' },
-  { code: 'checklist_done',   label: 'Unboxing checklist' },
-  { code: 'hardware_done',    label: 'Hardware walkthrough' },
-  { code: 'pairing_done',     label: 'Paired device' },
-  { code: 'tour_done',        label: 'Completed' },
+// The code is the last step the user FINISHED; `nowOn` is the screen that puts
+// in front of them, which is where they're stuck if they stop.
+export const ONBOARDING_STEPS: { code: string; label: string; nowOn: string }[] = [
+  { code: 'pairing',          label: 'Signed up',            nowOn: 'Welcome' },
+  { code: 'welcome_done',     label: 'Welcome',              nowOn: 'Preference quiz' },
+  // Customers whose machine is already running skip straight to WiFi setup.
+  { code: 'quiz_done',        label: 'Preference quiz',      nowOn: 'Customizing or WiFi setup' },
+  { code: 'customizing_done', label: 'Customizing',          nowOn: 'Unboxing checklist' },
+  { code: 'checklist_done',   label: 'Unboxing checklist',   nowOn: 'Hardware walkthrough' },
+  { code: 'hardware_done',    label: 'Hardware walkthrough', nowOn: 'WiFi setup' },
+  // Unapproved accounts wait here on Pending Approval; see nowOnLabel.
+  { code: 'pairing_done',     label: 'Paired device',        nowOn: 'Install the app' },
+  // Momentary: the next app visit finishes setup and moves them to tour_done.
+  { code: 'install_done',     label: 'Installed the app',    nowOn: 'Finishing setup' },
+  { code: 'tour_done',        label: 'Completed',            nowOn: 'Dashboard' },
 ];
 
 export type FunnelRow = { code: string; label: string; count: number; pct: number };

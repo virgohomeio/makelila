@@ -56,8 +56,12 @@ export function isLookupSafeSerial(serial: string): boolean {
 }
 
 // Same order as ingest-lovely-event: the unit's serial is the strongest
-// signal, the app account link is the fallback.
-export function resolveCustomer(report: DamageReport, lookups: CustomerLookups): ResolvedCustomer {
+// signal, the app account link is the fallback. Takes any Lovely row with a
+// serial and user id: damage reports and in-app feedback both resolve this way.
+export function resolveCustomer(
+  report: Pick<DamageReport, 'serial_number' | 'user_id'>,
+  lookups: CustomerLookups,
+): ResolvedCustomer {
   const serial = normalizeSerial(report.serial_number);
   const link = report.user_id ? lookups.linkByUserId.get(report.user_id) : undefined;
   const customerId =

@@ -192,7 +192,10 @@ describe('Stock › Parts — editable details', () => {
     render(<PartsTab />);
     edit('Tote Bag SKU', 'lila-tote-v2');
     await waitFor(() => expect(updatePartInfo).toHaveBeenCalledWith(tote, 'sku', 'LILA-TOTE-V2'));
-    expect(screen.getByText(/Demand is keyed by SKU/)).toBeInTheDocument();
+    // The notice is set AFTER the awaited updatePartInfo resolves, so it can render
+    // a tick after the mock is called. Find (retries) rather than get (one shot),
+    // or this races the re-render and flakes on CI.
+    expect(await screen.findByText(/Demand is keyed by SKU/)).toBeInTheDocument();
   });
 
   it('leaves the cell open when the write fails', async () => {

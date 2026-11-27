@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import type { FulfillmentQueueRow } from '../../../lib/fulfillment';
+import { pushShopifyFulfillment, type FulfillmentQueueRow } from '../../../lib/fulfillment';
 import { useSentEmail } from '../../../lib/templates';
 
 export function StepFulfilled({
@@ -85,6 +85,12 @@ export function StepFulfilled({
         <span style={valStyle}>{lilaShipment}</span>
         <span style={labelStyle}>Starter kit</span>
         <span style={valStyle}>{starterKit}</span>
+        {!isReplacement && (
+          <>
+            <span style={labelStyle}>Shopify</span>
+            <ShopifySyncStatus row={row} />
+          </>
+        )}
       </div>
 
       {row.email_sent_at && (
@@ -198,5 +204,61 @@ function SentEmailRecord({ orderRef, sentAt }: { orderRef: string; sentAt: strin
         This record is the proof of delivery.
       </div>
     </div>
+  );
+}
+
+/** Whether the Shopify order was marked fulfilled when pickup was confirmed.
+ *  The push runs in the background from confirmDock and its outcome lands on
+ *  the row (realtime refreshes it), so this mostly just reads the row. The
+ *  button covers failures and rows fulfilled before the auto-push existed. */
+function ShopifySyncStatus({ row }: { row: FulfillmentQueueRow }) {
+  const [busy, setBusy] = useState(false);
+  // The result of a push made from this panel, shown until the row catches up.
+  const [local, setLocal] = useState<{ ok: boolean; text: string } | null>(null);
+
+  const push = async () => {
+    setBusy(true);
+    setLocal(null);
+    try {
+      const r = await pushShopifyFulfillment(row.id);
+      if (r.status === 'pushed') setLocal({ ok: true, text: 'Marked fulfilled in Shopify' });
+      else if (r.status === 'already_fulfilled') setLocal({ ok: true, text: 'Already fulfilled in Shopify' });
+      else if (r.status === 'skipped') setLocal({ ok: false, text: r.reason });
+      else setLocal({ ok: false, text: r.error });
+    } catch (e) {
+      setLocal({ ok: false, text: (e as Error).message });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const linkBtn = {
+    background: 'none', border: 'none', padding: 0, marginLeft: 8, cursor: busy ? 'default' : 'pointer',
+    color: 'var(--color-crimson)', fontSize: 11, fontWeight: 600,
+  } as const;
+
+  if (local?.ok || row.shopify_fulfilled_at) {
+    return (
+      <span style={{ color: 'var(--color-success)' }}>
+        ✓ {local?.text ?? 'Marked fulfilled in Shopify'}
+        {row.shopify_fulfilled_at && !local && (
+          <span style={{ color: 'var(--color-ink-subtle)' }}>
+            {' · '}{new Date(row.shopify_fulfilled_at).toLocaleString('en-US')}
+          </span>
+        )}
+      </span>
+    );
+  }
+
+  const error = local?.text ?? row.shopify_sync_error;
+  return (
+    <span>
+      {error
+        ? <span style={{ color: 'var(--color-error)' }}>Not synced — {error}</span>
+        : <span style={{ color: 'var(--color-ink-subtle)' }}>Not marked fulfilled in Shopify yet</span>}
+      <button type="button" onClick={() => void push()} disabled={busy} style={linkBtn}>
+        {busy ? 'Syncing…' : error ? 'Retry' : 'Mark fulfilled in Shopify'}
+      </button>
+    </span>
   );
 }

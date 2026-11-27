@@ -150,8 +150,11 @@ function UserRow({ user, disabled, onEdit, onRemove }: {
 }
 
 /** Add/edit form. Same four fields as the primary-user block. */
-function UserForm({ initial, busy, submitLabel, onSubmit, onCancel }: {
+export function UserForm({ initial, busy, submitLabel, onSubmit, onCancel, who = 'Household user' }: {
   initial: AdditionalUserInput;
+  /** Prefix for the fields' accessible names — reused by the per-machine
+   *  primary-user editor. */
+  who?: string;
   busy: boolean;
   submitLabel: string;
   onSubmit: (input: AdditionalUserInput) => void;
@@ -172,19 +175,19 @@ function UserForm({ initial, busy, submitLabel, onSubmit, onCancel }: {
     <div className={styles.additionalUserForm}>
       <input className={styles.searchInput} placeholder="Full name (e.g. Sarah Lockhart)"
         value={name} disabled={busy} onChange={e => setName(e.target.value)}
-        aria-label="Household user full name" />
+        aria-label={`${who} full name`} />
       <input className={styles.searchInput} style={{ marginTop: 4 }} type="tel"
         placeholder="Phone (optional)"
         value={phone} disabled={busy} onChange={e => setPhone(e.target.value)}
-        aria-label="Household user phone" />
+        aria-label={`${who} phone`} />
       <input className={styles.searchInput} style={{ marginTop: 4 }} type="email"
         placeholder="Email (optional)"
         value={email} disabled={busy} onChange={e => setEmail(e.target.value)}
-        aria-label="Household user email" />
+        aria-label={`${who} email`} />
       <select className={styles.searchInput} style={{ marginTop: 4 }}
         value={relChoice} disabled={busy}
         onChange={e => setRelChoice(e.target.value)}
-        aria-label="Household user's relationship to the purchaser">
+        aria-label={`${who}'s relationship to the purchaser`}>
         <option value="">Relationship to purchaser (optional)…</option>
         {PRIMARY_USER_RELATIONSHIPS.map(r => <option key={r} value={r}>{r}</option>)}
         <option value={OTHER_RELATIONSHIP}>{OTHER_RELATIONSHIP}</option>

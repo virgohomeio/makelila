@@ -1,6 +1,9 @@
 import { useMemo, useState } from 'react';
 import type { FulfillmentQueueRow } from '../../../lib/fulfillment';
-import type { Order, OrderStatus } from '../../../lib/orders';
+import { resellerLabel, type Order, type OrderStatus } from '../../../lib/orders';
+import {
+  confirmedAtOf, deadlineLabel, daysUntil, severityOf, shipDeadlines, stageForStep,
+} from '../../../lib/shipDeadlines';
 import { replacementItemTags } from '../../../lib/replacementTags';
 import { refundFlagLabel, refundFlagTitle, type RefundFlag } from '../../../lib/refundedOrders';
 import { shippedMarkLabel, shippedMarkTitle, type ShippedMark } from '../../../lib/shippedOrders';
@@ -24,7 +27,24 @@ export type QueueOrderSummary = {
   kind?: 'sale' | 'replacement';
   line_items?: Order['line_items'];
   awaiting_batch_id?: string | null;
+  /** Shopify channel — a Walmart / Best Buy order wears its marketplace tag. */
+  sales_channel?: string | null;
+  /** Sales' hand-set priority pin. */
+  is_priority?: boolean | null;
+  /** When Sales last dispositioned the order — the confirm time that starts
+   *  the ship clock (lib/shipDeadlines.ts). */
+  dispositioned_at?: string | null;
 };
+
+/** The priority tag a Ready-to-ship row wears: the marketplace for a reseller
+ *  order, "Priority" for one Sales pinned by hand, nothing otherwise. */
+export function priorityTag(o: QueueOrderSummary | undefined): string | null {
+  if (!o) return null;
+  const reseller = resellerLabel(o);
+  if (reseller === 'Walmart' || reseller === 'Best Buy') return reseller;
+  if (o.is_priority) return 'Priority';
+  return null;
+}
 
 /** "lid", "hopper", "P100X" — the same vocabulary Fulfillment > Replacements
  *  uses, so the two surfaces name the same box the same way. Falls back to no
@@ -37,38 +57,17 @@ function replacementBadgeLabel(o: QueueOrderSummary): string {
   return tags.length > 0 ? `Replacement · ${tags.join(', ')}` : 'Replacement';
 }
 
-/** Parse a "YYYY-MM-DD" due-date as a LOCAL calendar date (not UTC midnight).
- *  Browsers parse `new Date("2026-04-20")` as UTC, which is off by a day in
- *  negative-UTC timezones — so "Due TODAY" could display as "OVERDUE by 1d". */
-function parseLocalDate(dueDate: string): Date {
-  const [y, m, d] = dueDate.split('-').map(Number);
-  return new Date(y, (m ?? 1) - 1, d ?? 1);
+/** The live ship deadline for an open row — "Book pickup today",
+ *  "Picked up by tomorrow", "Book pickup · 2d late". See lib/shipDeadlines. */
+function deadlineOf(r: FulfillmentQueueRow, o: QueueOrderSummary | undefined) {
+  const d = shipDeadlines(confirmedAtOf(r, o));
+  const stage = stageForStep(r.step);
+  const due = stage === 'schedule' ? d.scheduleBy : d.pickupBy;
+  const sev = severityOf(daysUntil(due));
+  return { label: deadlineLabel(stage, due), sev };
 }
 
-function daysUntil(dueDate: string): number {
-  const today = new Date(); today.setHours(0, 0, 0, 0);
-  const due = parseLocalDate(dueDate); due.setHours(0, 0, 0, 0);
-  return Math.round((due.getTime() - today.getTime()) / 86_400_000);
-}
-
-function dueClass(dueDate: string | null, fulfilled: boolean): string {
-  if (fulfilled) return `${styles.rowDue} ${styles.done}`;
-  if (!dueDate) return styles.rowDue;
-  const days = daysUntil(dueDate);
-  if (days < 0) return `${styles.rowDue} ${styles.today}`;
-  if (days === 0) return `${styles.rowDue} ${styles.today}`;
-  if (days <= 2) return `${styles.rowDue} ${styles.soon}`;
-  return `${styles.rowDue} ${styles.ok}`;
-}
-
-function dueLabel(dueDate: string | null, fulfilled: boolean): string {
-  if (fulfilled) return '✓ Fulfilled';
-  if (!dueDate) return '—';
-  const days = daysUntil(dueDate);
-  if (days < 0) return `⏰ OVERDUE by ${Math.abs(days)}d`;
-  if (days === 0) return '⏰ Due TODAY';
-  return `⏰ Due in ${days}d`;
-}
+const SEV_CLASS = { overdue: 'today', today: 'today', soon: 'soon', ok: 'ok' } as const;
 
 /** Does this row answer the operator's search?
  *
@@ -230,7 +229,9 @@ export function QueueSidebar({
     // step never got there — otherwise it lands in Shipped still shouting
     // "OVERDUE by 91d" about a box the customer has had since June.
     const fulfilled = r.step === 6 || !!shippedMark;
-    const overdue = !fulfilled && r.due_date && new Date(r.due_date) < new Date(new Date().setHours(0,0,0,0));
+    const deadline = fulfilled ? null : deadlineOf(r, o);
+    const overdue = deadline?.sev === 'overdue';
+    const tag = !fulfilled && tab !== 'shipped' && tab !== 'received' ? priorityTag(o) : null;
     const paused = !fulfilled && o?.status && o.status !== 'approved';
     const cls = [
       styles.queueRow,
@@ -263,6 +264,7 @@ export function QueueSidebar({
               {replacementBadgeLabel(o)}
             </span>
           )}
+          {tag && <span className={styles.channelTag} title="Priority order — ship first">{tag}</span>}
           <span className={styles.stepBadge}>{r.step}/6</span>
         </div>
         <div className={styles.rowMeta}>
@@ -301,9 +303,12 @@ export function QueueSidebar({
           <div className={`${styles.rowDue} ${styles.done}`}>
             ✓ Received {new Date(receivedOn).toLocaleDateString('en-US')}
           </div>
+        ) : tab === 'received' ? (
+          // Received, but nobody recorded the day (the pre-October backfill).
+          <div className={`${styles.rowDue} ${styles.done}`}>✓ Received</div>
         ) : (
-          <div className={dueClass(r.due_date, fulfilled)}>
-            {dueLabel(r.due_date, fulfilled)}
+          <div className={deadline ? `${styles.rowDue} ${styles[SEV_CLASS[deadline.sev]]}` : `${styles.rowDue} ${styles.done}`}>
+            {deadline ? deadline.label : '✓ Fulfilled'}
           </div>
         )}
       </div>
@@ -383,7 +388,7 @@ export function QueueSidebar({
         ) : tab === 'pickup' ? (
           <EmptyState
             title="Nothing waiting on a carrier"
-            body="An order moves here when Pickup scheduled is clicked at step 3 — and for a carton EZ Trans is picking, only once the Goorooship email carrying it has gone out."
+            body="Orders move here once the pickup is booked and the shipping email has gone out."
           />
         ) : tab === 'shipped' ? (
           <EmptyState
@@ -393,7 +398,7 @@ export function QueueSidebar({
         ) : (
           <EmptyState
             title="Nothing confirmed as received"
-            body="A shipped order moves here when Shipment Received is clicked on its card and the arrival date is recorded."
+            body="Click Shipment Received on a shipped order to move it here."
           />
         )
       ) : tab === 'ready' ? (

@@ -41,6 +41,10 @@ type ShopifyOrder = {
   landing_site?: string | null;
   landing_site_ref?: string | null;
   referring_site?: string | null;
+  // Which sales channel created the order: 'web' (online store), 'pos',
+  // 'shopify_draft_order', or a marketplace connector app (Mirakl → Walmart /
+  // Best Buy, Shopify Collective). Drives the Journey Report's Sale Source.
+  source_name?: string | null;
   currency?: string | null;
   presentment_currency?: string | null;
   total_price?: string | null;
@@ -102,6 +106,8 @@ type MappedOrder = {
   discount_codes: string[] | null;
   payment_methods: string[] | null;
   financial_status: string | null;
+  // Friendly Shopify sales-channel label (Our Website / Walmart / …), from source_name.
+  sales_channel: string;
   line_items: Array<{ sku: string; name: string; qty: number; price_usd: number }>;
   placed_at: string | null;
   // Per-order acquisition source, Shopify-style: UTM on the landing URL wins,
@@ -109,11 +115,40 @@ type MappedOrder = {
   attribution_source: string | null;
   attribution_medium: string | null;
   attribution_campaign: string | null;
+  // utm_content off the landing URL — for Meta ads this carries the exact ad
+  // creative (e.g. "Fall 2026 v1 - v28a"), which the Journey Report turns into
+  // a per-order "Saw Meta Ad v28a".
+  attribution_content: string | null;
   attribution_referrer: string | null;
   attribution_last_source: string | null;
   attribution_last_medium: string | null;
   attribution_last_referrer: string | null;
 };
+
+// Which Shopify sales channel an order came through, as a friendly label for the
+// Journey Report's Sale Source column. Shopify's REST `source_name` is 'web' for
+// the online store, 'pos' in person, 'shopify_draft_order' for a manually built
+// order, or a third-party app's id/handle for marketplace connectors (Mirakl →
+// Walmart / Best Buy, Shopify Collective). We can't always tell two Mirakl
+// marketplaces apart from source_name alone, so a bare 'mirakl' is labelled
+// generically and anything unrecognised is shown verbatim rather than guessed —
+// tighten the matches below as real values appear. Empty / 'web' ⇒ 'Our Website'.
+function salesChannelLabel(sourceName: string | null | undefined): string {
+  const raw = (sourceName ?? '').trim();
+  const s = raw.toLowerCase();
+  if (!s || s === 'web' || s === 'online_store' || s === 'online store') return 'Our Website';
+  if (s === 'pos') return 'Point of Sale';
+  if (s === 'shopify_draft_order' || s === 'draft_order' || s === 'iphone' || s === 'android') return 'Manual / Draft';
+  // Check the specific marketplace names before the generic connector so a
+  // source_name that actually says "walmart"/"best buy" resolves precisely.
+  if (/best\s*buy|bestbuy/.test(s)) return 'Best Buy';
+  if (/walmart/.test(s)) return 'Walmart';
+  if (/mirakl/.test(s)) return 'Marketplace (Mirakl)';
+  if (/collective/.test(s)) return 'Shopify Collective';
+  // Unknown app (a numeric app id or handle): surface it as-is so the channel is
+  // visible and never silently misfiled as our own website.
+  return raw;
+}
 
 function num(v: string | null | undefined): number | null {
   if (v == null || v === '') return null;
@@ -267,6 +302,7 @@ function mapOrder(
     discount_codes: o.discount_codes?.map(d => d.code).filter((c): c is string => !!c) ?? null,
     payment_methods: o.payment_gateway_names ?? null,
     financial_status: o.financial_status ?? null,
+    sales_channel: salesChannelLabel(o.source_name),
     line_items: (o.line_items ?? []).map(li => ({
       sku: li.sku ?? 'UNKNOWN',
       name: li.title ?? 'Unknown item',
@@ -280,6 +316,7 @@ function mapOrder(
         attribution_source: a.source,
         attribution_medium: a.medium,
         attribution_campaign: a.campaign,
+        attribution_content: a.content,
         attribution_referrer: o.referring_site ?? null,
         // Last-visit fields only come from the GraphQL journey; null on REST.
         attribution_last_source: null,
@@ -290,7 +327,7 @@ function mapOrder(
   };
 }
 
-type Attribution = { source: string | null; medium: string | null; campaign: string | null };
+type Attribution = { source: string | null; medium: string | null; campaign: string | null; content: string | null };
 
 /** UTM params off the landing URL. Returns null if there's no utm_source. */
 function parseUtm(landingUrl: string | null | undefined): Attribution | null {
@@ -303,6 +340,7 @@ function parseUtm(landingUrl: string | null | undefined): Attribution | null {
       source,
       medium: url.searchParams.get('utm_medium'),
       campaign: url.searchParams.get('utm_campaign'),
+      content: url.searchParams.get('utm_content'),
     };
   } catch {
     return null;
@@ -321,9 +359,9 @@ function hostOf(url: string | null | undefined): string | null {
 function classifyReferrer(referring: string | null | undefined): Attribution | null {
   const host = hostOf(referring);
   if (!host) return null;
-  const organic = (source: string): Attribution => ({ source, medium: 'organic', campaign: null });
-  const social  = (source: string): Attribution => ({ source, medium: 'social', campaign: null });
-  const referral = (source: string): Attribution => ({ source, medium: 'referral', campaign: null });
+  const organic = (source: string): Attribution => ({ source, medium: 'organic', campaign: null, content: null });
+  const social  = (source: string): Attribution => ({ source, medium: 'social', campaign: null, content: null });
+  const referral = (source: string): Attribution => ({ source, medium: 'referral', campaign: null, content: null });
   if (/(^|\.)google\./.test(host))                         return organic('google');
   if (/(^|\.)bing\./.test(host))                           return organic('bing');
   if (/duckduckgo|(^|\.)yahoo\.|ecosia|(^|\.)baidu\./.test(host)) return organic(host);
@@ -344,7 +382,7 @@ function classifyReferrer(referring: string | null | undefined): Attribution | n
 function deriveAttribution(landingUrl: string | null | undefined, referring: string | null | undefined): Attribution {
   return parseUtm(landingUrl)
     ?? classifyReferrer(referring)
-    ?? { source: 'shopify_direct', medium: 'direct', campaign: null };
+    ?? { source: 'shopify_direct', medium: 'direct', campaign: null, content: null };
 }
 
 // Shopify's own conversion summary ("1st session from Google") lives on the
@@ -354,7 +392,7 @@ type FirstVisit = {
   source?: string | null;
   sourceType?: string | null;
   referrerUrl?: string | null;
-  utmParameters?: { source?: string | null; medium?: string | null; campaign?: string | null } | null;
+  utmParameters?: { source?: string | null; medium?: string | null; campaign?: string | null; content?: string | null } | null;
 };
 
 /** Map Shopify's firstVisit into our source/medium. Precedence: UTM tags →
@@ -363,14 +401,14 @@ type FirstVisit = {
 function journeyAttribution(fv: FirstVisit | null | undefined): Attribution | null {
   if (!fv) return null;
   const utm = fv.utmParameters;
-  if (utm?.source) return { source: utm.source, medium: utm.medium ?? null, campaign: utm.campaign ?? null };
+  if (utm?.source) return { source: utm.source, medium: utm.medium ?? null, campaign: utm.campaign ?? null, content: utm.content ?? null };
 
   // Prefer the actual referring site so a referral resolves to its real channel
   // (Instagram, Linktree, someblog.com) rather than a bare "referral".
   const known = classifyReferrer(fv.referrerUrl);
   if (known) return known;
   const host = hostOf(fv.referrerUrl);
-  if (host) return { source: host, medium: 'referral', campaign: null };
+  if (host) return { source: host, medium: 'referral', campaign: null, content: null };
 
   const src = (fv.source ?? '').toLowerCase().trim();
   if (!src) return null;
@@ -382,7 +420,7 @@ function journeyAttribution(fv: FirstVisit | null | undefined): Attribution | nu
     type === 'direct'   ? 'direct'   :
     type === 'referral' ? 'referral' :
     (type || 'referral');
-  return { source: src, medium, campaign: null };
+  return { source: src, medium, campaign: null, content: null };
 }
 
 /** Run `task` over `items` with at most `limit` in flight.
@@ -438,7 +476,7 @@ async function fetchJourneyAttribution(
   const withId = refs
     .map(ref => ({ ref, id: rawByRef.get(ref)?.id }))
     .filter((x): x is { ref: string; id: number } => typeof x.id === 'number');
-  const VISIT = 'source sourceType referrerUrl utmParameters { source medium campaign }';
+  const VISIT = 'source sourceType referrerUrl utmParameters { source medium campaign content }';
   const FIELDS = `customerJourneySummary { firstVisit { ${VISIT} } lastVisit { ${VISIT} } }`;
   const batches: Array<Array<{ ref: string; id: number }>> = [];
   for (let i = 0; i < withId.length; i += 40) batches.push(withId.slice(i, i + 40));
@@ -558,6 +596,7 @@ serve(async (req: Request) => {
         m.attribution_source = j.first.attr.source;
         m.attribution_medium = j.first.attr.medium;
         m.attribution_campaign = j.first.attr.campaign;
+        m.attribution_content = j.first.attr.content;
         if (j.first.referrer) m.attribution_referrer = j.first.referrer;
       }
       if (j?.last?.attr.source) {
@@ -661,12 +700,14 @@ serve(async (req: Request) => {
       discount_codes: m.discount_codes,
       payment_methods: m.payment_methods,
       financial_status: m.financial_status,
+      sales_channel: m.sales_channel,
       line_items: m.line_items,
       // Shopify-derived source of truth — safe to refresh; backfills existing
       // orders (that predate this column) on the next full sync.
       attribution_source: m.attribution_source,
       attribution_medium: m.attribution_medium,
       attribution_campaign: m.attribution_campaign,
+      attribution_content: m.attribution_content,
       attribution_referrer: m.attribution_referrer,
       attribution_last_source: m.attribution_last_source,
       attribution_last_medium: m.attribution_last_medium,
@@ -675,10 +716,15 @@ serve(async (req: Request) => {
 
     let addressChanged = false;
     if (!operatorTouched) {
+      // Shopify's address2 is blank on most orders, and an operator who got the
+      // apartment/unit number from the customer types it into the Address card.
+      // A blank from Shopify must not wipe that — only a unit Shopify actually
+      // has replaces it.
+      const line2 = m.address_line2 ?? existing?.address_line2 ?? null;
       refreshPatch.customer_email = m.customer_email;
       refreshPatch.customer_phone = m.customer_phone;
       refreshPatch.address_line   = m.address_line;
-      refreshPatch.address_line2  = m.address_line2;
+      refreshPatch.address_line2  = line2;
       refreshPatch.city           = m.city;
       refreshPatch.region_state   = m.region_state;
       refreshPatch.country        = m.country;
@@ -707,7 +753,7 @@ serve(async (req: Request) => {
       if (
         (existing?.postal_code ?? null) !== (m.postal_code ?? null) ||
         (existing?.address_line ?? null) !== (m.address_line ?? null) ||
-        (existing?.address_line2 ?? null) !== (m.address_line2 ?? null)
+        (existing?.address_line2 ?? null) !== line2
       ) {
         // The address moved, so every verified fact about it is stale —
         // including the dwelling type and the unit check, which is the whole

@@ -21,8 +21,8 @@ build/
 **/supabase/.temp/
 **/supabase/.branches/
 
-# Brainstorm server state (volatile pid/status files)
-.superpowers/**/state/
+# Brainstorm companion sessions (mockups + volatile pid/status files)
+.superpowers/
 
 # IDE / OS
 .DS_Store

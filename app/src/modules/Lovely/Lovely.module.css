@@ -307,6 +307,39 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* Each funnel row is a button that opens that step's customer list. The
+   negative margin keeps the layout where it was while giving the hover and
+   selected states some room around the content. */
+.funnelRowBtn {
+  margin: -6px -8px;
+  padding: 6px 8px;
+  background: none;
+  border: none;
+  border-radius: 8px;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.funnelRowBtn:hover:not(:disabled) { background: rgba(44, 42, 37, 0.04); }
+.funnelRowBtn:focus-visible { outline: 2px solid var(--color-crimson); outline-offset: 0; }
+.funnelRowBtn:disabled { cursor: default; }
+.funnelRowActive,
+.funnelRowActive:hover:not(:disabled) { background: rgba(44, 42, 37, 0.07); }
+.funnelStuck { font-size: 11px; font-weight: 500; color: #8a5a16; margin-top: 2px; }
+
+/* Red sibling of .calloutBar: finished setups whose machine isn't reporting. */
+.alertBar {
+  font-size: 13px;
+  color: #a02222;
+  background: rgba(204, 45, 48, 0.08);
+  border-radius: 10px;
+  padding: 10px 14px;
+}
+
+.setupList { display: flex; flex-direction: column; gap: 10px; }
+.setupListHead { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.setupListTitle { font-size: 15px; font-weight: 600; color: var(--color-ink); margin: 0; }
+
 /* ---- Firmware / OTA ---- */
 
 .firmwareActions { display: flex; }

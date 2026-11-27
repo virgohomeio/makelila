@@ -42,7 +42,10 @@ export function StepLabel({
   // is this row's and cannot follow the operator to the next one they click.
   const [carrier, setCarrier] = useState<string>(row.carrier ?? '');
   const [tracking, setTracking] = useState<string>(row.tracking_num ?? '');
-  const [starterTracking, setStarterTracking] = useState<string>(row.starter_tracking_num ?? '');
+  // Ticked, or an older row that already carries an Amazon tracking number.
+  const [starterOrdered, setStarterOrdered] = useState<boolean>(
+    !!row.starter_ordered_at || !!row.starter_tracking_num?.trim(),
+  );
   // The other answer the starter card can give: this order ships no soil, and
   // here is why. Held here rather than in the card so the gate below and the
   // card are reading one value — a card with its own copy could leave the step
@@ -138,7 +141,8 @@ export function StepLabel({
     blockers.push(route === 'goorooship' ? 'the Goorooship tracking number' : 'the Freightcom tracking number');
   }
   const starterGap = starterBlocker(order, {
-    starter_tracking_num: starterTracking,
+    starter_tracking_num: null,
+    starter_ordered_at: starterOrdered ? 'ticked' : null,
     starter_skipped_at: starterSkip?.at ?? null,
   });
   if (starterGap) blockers.push(starterGap);
@@ -155,9 +159,6 @@ export function StepLabel({
       await confirmLabel(row.id, {
         carrier,
         tracking_num: tracking.trim(),
-        // Saved whatever the destination: starter soil was never a US-only
-        // product, only a US-only field.
-        ...(starterTracking.trim() ? { starter_tracking_num: starterTracking.trim() } : {}),
       });
     } catch (e) { setError((e as Error).message); }
     finally { setBusy(false); }
@@ -165,7 +166,7 @@ export function StepLabel({
 
   return (
     <div>
-      <h3 style={{ fontSize: 13, fontWeight: 700, marginBottom: 8 }}>Attach the shipping label details</h3>
+      <h3 style={{ fontSize: 13, fontWeight: 700, marginBottom: 8 }}>Book the pickup</h3>
 
       {/* Above the booking panels on purpose. It gates both of them — the
           Goorooship email as much as the Freightcom confirm — so a card the
@@ -175,8 +176,8 @@ export function StepLabel({
       <StepStarterKit
         queueId={row.id}
         order={order}
-        tracking={starterTracking}
-        onTrackingChange={setStarterTracking}
+        ordered={starterOrdered}
+        onOrderedChange={setStarterOrdered}
         skip={starterSkip}
         onSkipChange={setStarterSkip}
       />
@@ -187,7 +188,7 @@ export function StepLabel({
           booked through Goorooship at all. */}
       {isEzTrans && (
         <div className={styles.routePicker} data-testid="carrier-route">
-          <span className={styles.routePickerLabel}>Booked through:</span>
+          <span className={styles.routePickerLabel}>Book with:</span>
           <button
             type="button"
             className={route === 'goorooship' ? styles.routeBtnOn : styles.routeBtn}
@@ -200,12 +201,6 @@ export function StepLabel({
             onClick={() => setRouteOverride('freightcom')}
             data-testid="route-freightcom"
           >Freightcom</button>
-          <span className={styles.bookingHint}>
-            {route === 'freightcom'
-              ? 'Booked in the Freightcom portal. EZ Trans still hold the machine, '
-                + 'so the handoff email is queued below as usual.'
-              : 'Switch to Freightcom if you booked this one in the Freightcom portal.'}
-          </span>
         </div>
       )}
 
@@ -264,8 +259,7 @@ export function StepLabel({
           Freightcom and still record the booking. */}
       {route === 'goorooship' && !bookedLoading && (
         <p className={styles.bookingHint} data-testid="goorooship-escape">
-          No Goorooship panel above? The machines on this order could not be
-          located at EZ Trans. Switch to Freightcom to record the booking.
+          No Goorooship panel? Switch to Freightcom.
         </p>
       )}
 
